@@ -47,6 +47,7 @@ static SetChainData_t g_chainViewArray[] = {
     {REMAPVIEW_SUI_SIGN_MESSAGE_HASH, (SetChainDataFunc)GuiSetSuiUrData},
     {REMAPVIEW_SOL, (SetChainDataFunc)GuiSetSolUrData},
     {REMAPVIEW_SOL_MESSAGE, (SetChainDataFunc)GuiSetSolUrData},
+    {REMAPVIEW_NEAR, (SetChainDataFunc)GuiSetNearUrData},
     {REMAPVIEW_APT, (SetChainDataFunc)GuiSetAptosUrData},
     {REMAPVIEW_ADA, (SetChainDataFunc)GuiSetupAdaUrData},
     {REMAPVIEW_ADA_SIGN_TX_HASH, (SetChainDataFunc)GuiSetupAdaUrData},

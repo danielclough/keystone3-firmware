@@ -363,6 +363,7 @@ else()
     endforeach()
 
     add_executable(${PROJECT_NAME}
+        ui_simulator/webusb_stub.c
         ${SIMULATOR_SRC}
         ${EXTERNAL}
         ${SOURCES}
@@ -376,7 +377,7 @@ else()
     add_dependencies(${PROJECT_NAME} rust_c)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL2 ${CMAKE_SOURCE_DIR}/ui_simulator/lib/rust-builds/librust_c.a)
     if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
-      target_link_libraries(${PROJECT_NAME} PRIVATE m dl pthread )
+      target_link_libraries(${PROJECT_NAME} PRIVATE m dl pthread xcb)
     endif()
 
     if(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")

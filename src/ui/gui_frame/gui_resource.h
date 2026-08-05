@@ -183,6 +183,7 @@ LV_IMG_DECLARE(coinDot);
 LV_IMG_DECLARE(coinEth);
 LV_IMG_DECLARE(coinKsm);
 LV_IMG_DECLARE(coinMatic);
+LV_IMG_DECLARE(coinNear);
 LV_IMG_DECLARE(coinOkb);
 LV_IMG_DECLARE(coinSol);
 LV_IMG_DECLARE(coinSui);

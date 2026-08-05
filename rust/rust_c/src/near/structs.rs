@@ -41,6 +41,8 @@ pub struct DisplayNearTxOverview {
     pub transfer_from: PtrString,
     pub transfer_to: PtrString,
     // general
+    pub from: PtrString,
+    pub to: PtrString,
     pub action_list: PtrT<VecFFI<DisplayNearTxOverviewGeneralAction>>,
 }
 
@@ -54,6 +56,8 @@ impl Default for DisplayNearTxOverview {
             main_action: null_mut(),
             transfer_from: null_mut(),
             transfer_to: null_mut(),
+            from: null_mut(),
+            to: null_mut(),
             action_list: null_mut(),
         }
     }
@@ -74,6 +78,8 @@ impl Free for DisplayNearTxOverview {
         free_str_ptr!(self.transfer_value);
         free_str_ptr!(self.transfer_from);
         free_str_ptr!(self.transfer_to);
+        free_str_ptr!(self.from);
+        free_str_ptr!(self.to);
         if !self.action_list.is_null() {
             let x = Box::from_raw(self.action_list);
             let ve = Vec::from_raw_parts(x.data, x.size, x.cap);
@@ -116,6 +122,8 @@ impl From<&ParsedNearTx> for DisplayNearTxOverview {
                     return Self {
                         display_type,
                         //vote
+                        from: convert_c_char(overview.from.to_string()),
+                        to: convert_c_char(overview.to.to_string()),
                         action_list: VecFFI::from(
                             overview
                                 .action_list

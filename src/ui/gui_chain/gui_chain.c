@@ -89,6 +89,8 @@ static const ViewHandlerEntry g_viewHandlerMap[] = {
     {SolanaTx, GuiGetSolSignQrCodeData, GuiGetSolSignQrCodeData, GuiGetSolCheckResult, CHAIN_SOL, REMAPVIEW_SOL},
     {SolanaMessage, GuiGetSolSignQrCodeData, GuiGetSolSignQrCodeData, GuiGetSolCheckResult, CHAIN_SOL, REMAPVIEW_SOL_MESSAGE},
 
+    {NearTx, GuiGetNearSignQrCodeData, GuiGetNearSignQrCodeData, GuiGetNearCheckResult, CHAIN_NEAR, REMAPVIEW_NEAR},
+
     {AptosTx, GuiGetAptosSignQrCodeData, NULL, GuiGetAptosCheckResult, CHAIN_APT, REMAPVIEW_APT},
 
     {CardanoSignTxHash, GuiGetAdaSignTxHashQrCodeData, GuiGetAdaSignTxHashQrCodeData, GuiGetAdaSignTxHashCheckResult, CHAIN_ADA, REMAPVIEW_ADA_SIGN_TX_HASH},

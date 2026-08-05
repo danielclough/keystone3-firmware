@@ -525,18 +525,28 @@ void GuiLockScreenUpdatePassCode(void)
 #include "keystore.h"
 #endif
 
+// The countdown timer's user_data is a label owned by g_LoadingView, so the timer MUST NOT
+// outlive that view. It self-deletes only once it reaches its third tick, which means any path
+// that tears g_LoadingView down sooner (XPub generation finishing in under 3s — the common case
+// on fast hardware, and essentially always in the simulator) would otherwise leave the timer
+// live holding a freed label, and the next tick faults inside lv_label_set_text ->
+// lv_obj_invalidate. Call this from every teardown path rather than relying on the tick count.
+static void StopCountDownTimer(void)
+{
+    if (g_countDownTimer != NULL) {
+        lv_timer_del(g_countDownTimer);
+        g_countDownTimer = NULL;
+    }
+    g_countDown = 0;
+}
+
 static void CountDownTimerChangeLabelTextHandler(lv_timer_t *timer)
 {
     lv_obj_t *obj = (lv_obj_t *)timer->user_data;
     ++g_countDown;
     if (g_countDown == 3) {
         lv_label_set_text(obj, _("prepare_wallet_third_step"));
-        if (g_countDownTimer != NULL) {
-            g_countDown = 0;
-            lv_timer_del(g_countDownTimer);
-            g_countDownTimer = NULL;
-            UNUSED(g_countDownTimer);
-        }
+        StopCountDownTimer();
     }
 }
 
@@ -550,6 +560,7 @@ void GuiShowGenerateXPubLoading(void)
     }
 
     if (g_LoadingView != NULL && lv_obj_is_valid(g_LoadingView)) {
+        StopCountDownTimer();
         lv_obj_del(g_LoadingView);
         g_LoadingView = NULL;
     }
@@ -599,6 +610,7 @@ static void GuiCloseGenerateXPubLoading(void)
     if (g_canDismissLoading) {
         if (g_LoadingView != NULL && lv_obj_is_valid(g_LoadingView)) {
             GuiStopCircleAroundAnimation();
+            StopCountDownTimer();
             lv_obj_del(g_LoadingView);
             g_LoadingView = NULL;
         }

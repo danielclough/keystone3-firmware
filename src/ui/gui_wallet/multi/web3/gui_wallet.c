@@ -662,6 +662,42 @@ UREncodeResult *GuiGetHeliumData(void)
     return urEncode;
 }
 
+static PtrT_CSliceFFI_ExtendedPublicKey BuildNearAccountKeys(ExtendedPublicKey *keys)
+{
+    PtrT_CSliceFFI_ExtendedPublicKey public_keys = SRAM_MALLOC(sizeof(CSliceFFI_ExtendedPublicKey));
+    public_keys->data = keys;
+    public_keys->size = 11;
+
+    char *path = SRAM_MALLOC(BUFFER_SIZE_32);
+    snprintf_s(path, BUFFER_SIZE_32, "m/44'/397'/0'");
+    keys[0].path = path;
+    keys[0].xpub = GetCurrentAccountPublicKey(XPUB_TYPE_NEAR_STANDARD_0);
+
+    for (int i = XPUB_TYPE_NEAR_LEDGER_LIVE_0; i <= XPUB_TYPE_NEAR_LEDGER_LIVE_9; i++) {
+        int idx = i - XPUB_TYPE_NEAR_LEDGER_LIVE_0;
+        char *p = SRAM_MALLOC(BUFFER_SIZE_32);
+        snprintf_s(p, BUFFER_SIZE_32, "m/44'/397'/0'/0'/%d'", idx);
+        keys[1 + idx].path = p;
+        keys[1 + idx].xpub = GetCurrentAccountPublicKey(i);
+    }
+    return public_keys;
+}
+
+UREncodeResult *GuiGetNearWalletData(void)
+{
+    uint8_t mfp[4] = {0};
+    GetMasterFingerPrint(mfp);
+    ExtendedPublicKey keys[11];
+    PtrT_CSliceFFI_ExtendedPublicKey public_keys = BuildNearAccountKeys(keys);
+    UREncodeResult *urEncode = generate_common_crypto_multi_accounts_ur(mfp, sizeof(mfp), public_keys, "NEAR");
+    CHECK_CHAIN_PRINT(urEncode);
+    for (int i = 0; i < public_keys->size; i++) {
+        SRAM_FREE(public_keys->data[i].path);
+    }
+    SRAM_FREE(public_keys);
+    return urEncode;
+}
+
 UREncodeResult *GuiGetXBullData(void)
 {
     uint8_t mfp[4] = {0};

@@ -166,6 +166,10 @@ static const lv_img_dsc_t *g_solfareCoinArray[1] = {
     &coinSol,
 };
 
+static const lv_img_dsc_t *g_nearCoinArray[1] = {
+    &coinNear,
+};
+
 static const lv_img_dsc_t *g_nufiCoinArray[5] = {
     &coinSol,
     &coinEth,
@@ -217,6 +221,7 @@ WalletListItem_t g_walletListArray[] = {
     {WALLET_LIST_NUFI, &walletNufi, "NuFi", g_nufiCoinArray, 5, true, WALLET_FILTER_BTC | WALLET_FILTER_ETH | WALLET_FILTER_SOL | WALLET_FILTER_ADA},
     {WALLET_LIST_CORE, &walletCore, "Core Wallet", g_coreCoinArray, 3, true, WALLET_FILTER_BTC | WALLET_FILTER_ETH | WALLET_FILTER_OTHER},
     {WALLET_LIST_HELIUM, &walletHelium, "Helium Wallet", g_heliumCoinArray, 2, true, WALLET_FILTER_SOL},
+    {WALLET_LIST_NEAR, &coinNear, "NEAR", g_nearCoinArray, 1, true, WALLET_FILTER_OTHER},
     {WALLET_LIST_BTC_WALLET, &coinBtc, "Bitcoin Wallets", g_btcWalletCoinArray, 5, true, WALLET_FILTER_BTC},
     {WALLET_LIST_TONKEEPER, &walletTonkeeper, "Tonkeeper", g_tonKeeperCoinArray, 1, false, WALLET_FILTER_OTHER},
     {WALLET_LIST_RABBY, &walletRabby, "Rabby", g_ethWalletCoinArray, 4, true, WALLET_FILTER_ETH},
@@ -1197,6 +1202,10 @@ void GuiConnectWalletSetQrdata(WALLET_LIST_INDEX_ENUM index)
     case WALLET_LIST_HELIUM:
         func = GuiGetHeliumData;
         AddCoinsFromArray(g_heliumCoinArray, NUMBER_OF_ARRAYS(g_heliumCoinArray), false, 0);
+        break;
+    case WALLET_LIST_NEAR:
+        func = GuiGetNearWalletData;
+        AddCoinsFromArray(g_nearCoinArray, NUMBER_OF_ARRAYS(g_nearCoinArray), false, 0);
         break;
     case WALLET_LIST_BACKPACK:
         func = GuiGetBackpackData;
