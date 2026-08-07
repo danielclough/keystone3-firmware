@@ -662,6 +662,53 @@ UREncodeResult *GuiGetHeliumData(void)
     return urEncode;
 }
 
+// The caller's stack array, the slice length below and the derive loop must all agree exactly:
+// BuildNearAccountKeys writes one standard key plus one per XPUB_TYPE_NEAR_LEDGER_LIVE_* entry into
+// an array it does not own and cannot size-check. Deriving all three from the enum is what keeps
+// adding a ledger-live index from silently smashing GuiGetNearWalletData's stack — it already did
+// once, when the enum grew to _23 while the array stayed ExtendedPublicKey[11] and the slice stayed
+// 11: 25 structs into 11 slots, straight through the canary (SIGABRT, "stack smashing detected").
+// A short slice is not harmless either — the free loop below walks size, so it would leak every
+// path past it.
+#define NEAR_EXPORT_KEY_COUNT \
+    (1 + (XPUB_TYPE_NEAR_LEDGER_LIVE_23 - XPUB_TYPE_NEAR_LEDGER_LIVE_0 + 1))
+
+static PtrT_CSliceFFI_ExtendedPublicKey BuildNearAccountKeys(ExtendedPublicKey *keys)
+{
+    PtrT_CSliceFFI_ExtendedPublicKey public_keys = SRAM_MALLOC(sizeof(CSliceFFI_ExtendedPublicKey));
+    public_keys->data = keys;
+    public_keys->size = NEAR_EXPORT_KEY_COUNT;
+
+    char *path = SRAM_MALLOC(BUFFER_SIZE_32);
+    snprintf_s(path, BUFFER_SIZE_32, "m/44'/397'/0'");
+    keys[0].path = path;
+    keys[0].xpub = GetCurrentAccountPublicKey(XPUB_TYPE_NEAR_STANDARD_0);
+
+    for (int i = XPUB_TYPE_NEAR_LEDGER_LIVE_0; i <= XPUB_TYPE_NEAR_LEDGER_LIVE_23; i++) {
+        int idx = i - XPUB_TYPE_NEAR_LEDGER_LIVE_0;
+        char *p = SRAM_MALLOC(BUFFER_SIZE_32);
+        snprintf_s(p, BUFFER_SIZE_32, "m/44'/397'/0'/0'/%d'", idx);
+        keys[1 + idx].path = p;
+        keys[1 + idx].xpub = GetCurrentAccountPublicKey(i);
+    }
+    return public_keys;
+}
+
+UREncodeResult *GuiGetNearWalletData(void)
+{
+    uint8_t mfp[4] = {0};
+    GetMasterFingerPrint(mfp);
+    ExtendedPublicKey keys[NEAR_EXPORT_KEY_COUNT];
+    PtrT_CSliceFFI_ExtendedPublicKey public_keys = BuildNearAccountKeys(keys);
+    UREncodeResult *urEncode = generate_common_crypto_multi_accounts_ur(mfp, sizeof(mfp), public_keys, "NEAR");
+    CHECK_CHAIN_PRINT(urEncode);
+    for (int i = 0; i < public_keys->size; i++) {
+        SRAM_FREE(public_keys->data[i].path);
+    }
+    SRAM_FREE(public_keys);
+    return urEncode;
+}
+
 UREncodeResult *GuiGetXBullData(void)
 {
     uint8_t mfp[4] = {0};

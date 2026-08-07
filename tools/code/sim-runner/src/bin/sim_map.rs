@@ -72,6 +72,7 @@ fn cmd_boot() -> anyhow::Result<()> {
         "Xvfb",
         &[sim_common::DISPLAY, "-screen", "0", sim_common::RESOLUTION],
         None,
+        None,
     )
     .context("starting Xvfb — is it installed? (`sudo apt install xvfb`)")?;
     sim_common::wait_for(Duration::from_secs(5), || {
@@ -80,12 +81,14 @@ fn cmd_boot() -> anyhow::Result<()> {
     .context("Xvfb never came up")?;
 
     let dir = sim_common::firmware_dir();
-    let sim = sim_common::spawn_detached("./build/simulator", &[], Some(&dir)).with_context(|| {
-        format!(
-            "starting the simulator — build it first: `cd {} && python3 build.py -o simulator`",
-            dir.display()
-        )
-    })?;
+    let log = sim_common::simulator_log_path();
+    let sim = sim_common::spawn_detached("./build/simulator", &[], Some(&dir), Some(&log))
+        .with_context(|| {
+            format!(
+                "starting the simulator — build it first: `cd {} && python3 build.py -o simulator`",
+                dir.display()
+            )
+        })?;
 
     let window_id = sim_common::wait_for_window().context(
         "simulator window never appeared — must run with the firmware repo root as cwd, or \
@@ -119,6 +122,12 @@ fn cmd_status() -> anyhow::Result<()> {
         s.sim_pid,
         if sim_ok { "alive" } else { "dead" },
     );
+    if !sim_ok {
+        // A dead simulator here almost always means the firmware crashed under the last tap, so
+        // point at the log rather than leaving the next `tap`/`shot` to fail against a window id
+        // that no longer resolves.
+        println!("simulator output: {}", sim_common::simulator_log_path().display());
+    }
     if !xvfb_ok || !sim_ok {
         anyhow::bail!("session is stale — `sim_map teardown` then `sim_map boot` again");
     }

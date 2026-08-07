@@ -84,13 +84,38 @@ pub fn run(bin: &str, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
 }
 
-pub fn spawn_detached(bin: &str, args: &[&str], cwd: Option<&Path>) -> anyhow::Result<Child> {
+/// Where the simulator's own stdout+stderr are kept. A firmware crash announces itself *only*
+/// there — LVGL asserts and glibc's "stack smashing detected" both go to stderr and nowhere else —
+/// so sending it to /dev/null means a crash reaches the operator only as whatever the next X11 call
+/// does with a window that no longer exists, which is not a recognisable crash report.
+pub fn simulator_log_path() -> PathBuf {
+    std::env::temp_dir().join("sim-simulator.log")
+}
+
+/// `log` of `None` discards output; `Some(path)` truncates it and captures both streams there.
+pub fn spawn_detached(
+    bin: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    log: Option<&Path>,
+) -> anyhow::Result<Child> {
+    let (out, err) = match log {
+        Some(path) => {
+            let file = std::fs::File::create(path)
+                .with_context(|| format!("creating log file {}", path.display()))?;
+            let dup = file
+                .try_clone()
+                .with_context(|| format!("duplicating log handle for {}", path.display()))?;
+            (Stdio::from(file), Stdio::from(dup))
+        }
+        None => (Stdio::null(), Stdio::null()),
+    };
     let mut cmd = Command::new(bin);
     cmd.args(args)
         .env("DISPLAY", DISPLAY)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(out)
+        .stderr(err);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }

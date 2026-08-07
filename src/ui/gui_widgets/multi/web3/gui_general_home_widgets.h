@@ -4,6 +4,7 @@
 
 #define HOME_WIDGETS_SURPLUS_CARD_ENUM HOME_WALLET_CARD_ETH,     \
                                        HOME_WALLET_CARD_SOL,     \
+                                       HOME_WALLET_CARD_NEAR,    \
                                        HOME_WALLET_CARD_BNB,     \
                                        HOME_WALLET_CARD_HNT,     \
                                        HOME_WALLET_CARD_XRP,     \
@@ -62,6 +63,7 @@
 #define HOME_WALLET_STATE_SURPLUS                         \
     {HOME_WALLET_CARD_ETH, false, "ETH", true},           \
         {HOME_WALLET_CARD_SOL, false, "SOL", true},       \
+        {HOME_WALLET_CARD_NEAR, false, "NEAR", true},     \
         {HOME_WALLET_CARD_BNB, false, "BNB", false},      \
         {HOME_WALLET_CARD_HNT, false, "HNT", true},       \
         {HOME_WALLET_CARD_XRP, false, "XRP", true},       \
@@ -132,6 +134,12 @@
             .coin = "SOL",                     \
             .chain = "Solana",                 \
             .icon = &coinSol,                  \
+        },                                     \
+        {                                      \
+            .index = HOME_WALLET_CARD_NEAR,    \
+            .coin = "NEAR",                    \
+            .chain = "Near",                   \
+            .icon = &coinNear,                 \
         },                                     \
         {                                      \
             .index = HOME_WALLET_CARD_BNB,     \

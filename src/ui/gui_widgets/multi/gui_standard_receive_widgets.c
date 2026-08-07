@@ -798,6 +798,12 @@ static int GetMaxAddressIndex(void)
     if (g_chainCard == HOME_WALLET_CARD_XRP) {
         return 200;
     }
+    if (g_chainCard == HOME_WALLET_CARD_NEAR) {
+        // NEAR's receive address is the fixed STANDARD_0 implicit account,
+        // not derived per-index -- no switcher, or every "different" index
+        // would show the identical address.
+        return 1;
+    }
 #endif
     return GENERAL_ADDRESS_INDEX_MAX;
 }
@@ -969,6 +975,11 @@ static void ModelGetAddress(uint32_t index, AddressDataItem_t *item)
         result = ton_get_address(xPub);
         break;
     }
+    case HOME_WALLET_CARD_NEAR:
+        xPub = GetCurrentAccountPublicKey(XPUB_TYPE_NEAR_STANDARD_0);
+        snprintf_s(hdPath, BUFFER_SIZE_128, "M/44'/397'/0'");
+        result = near_get_address(xPub);
+        break;
     default:
         if (IsCosmosChain(g_chainCard)) {
             result = (SimpleResponse_c_char *) GetCosmosChainAddressByCoinTypeAndIndex(g_chainCard, index);

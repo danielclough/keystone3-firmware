@@ -326,7 +326,6 @@ dependencies = [
  "cryptoxide",
  "hex",
  "keystore",
- "primitive-types 0.10.1",
  "serde",
  "serde_json",
  "thiserror-core",

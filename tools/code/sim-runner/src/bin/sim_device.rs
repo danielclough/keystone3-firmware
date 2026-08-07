@@ -5,7 +5,9 @@ use sim_runner::common as sim_common;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
+use ur_parse_lib::keystone_ur_decoder::probe_decode;
 use ur_parse_lib::keystone_ur_encoder::probe_encode;
+use ur_registry::extend::crypto_multi_accounts::CryptoMultiAccounts;
 
 const TEST_SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -37,6 +39,18 @@ enum Command {
     Export {
         #[arg(long)]
         map: PathBuf,
+        #[arg(long)]
+        debug_frames: Option<PathBuf>,
+    },
+    /// Runs the same export flow as `Export`, then decodes the resulting `crypto-multi-accounts`
+    /// UR in-process and prints the NEAR public key ("ed25519:...") whose origin path matches
+    /// `path` exactly (e.g. "44'/397'/0'") — sim_device has no way to ask the on-device UI for a
+    /// single derivation path directly, only a full export, so this mirrors fake_device's
+    /// `pubkey <path>` interface on top of that.
+    Pubkey {
+        #[arg(long)]
+        map: PathBuf,
+        path: String,
         #[arg(long)]
         debug_frames: Option<PathBuf>,
     },
@@ -138,11 +152,13 @@ impl SimHarness {
             "Xvfb",
             &[sim_common::DISPLAY, "-screen", "0", sim_common::RESOLUTION],
             None,
+            None,
         )
         .context("starting Xvfb — is it installed? (`sudo apt install xvfb`)")?;
 
         let dir = sim_common::firmware_dir();
-        let placeholder = sim_common::spawn_detached("true", &[], None).context("spawning placeholder")?;
+        let placeholder =
+            sim_common::spawn_detached("true", &[], None, None).context("spawning placeholder")?;
         let mut harness = SimHarness { xvfb, simulator: placeholder, window_id: String::new() };
 
         sim_common::wait_for(Duration::from_secs(5), || {
@@ -150,7 +166,8 @@ impl SimHarness {
         })
         .context("Xvfb never came up")?;
 
-        let simulator = sim_common::spawn_detached("./build/simulator", &[], Some(&dir))
+        let log = sim_common::simulator_log_path();
+        let simulator = sim_common::spawn_detached("./build/simulator", &[], Some(&dir), Some(&log))
             .with_context(|| {
                 format!(
                     "starting the simulator — build it first: `cd {} && python3 build.py -o simulator`",
@@ -171,7 +188,29 @@ impl SimHarness {
         Ok(harness)
     }
 
-    fn navigate_to_export(&self, map: &ClickMap) -> anyhow::Result<()> {
+    /// Fails if the simulator has exited, quoting its log. Every UI step below funnels through
+    /// this before it is allowed to blame its own tooling: once the firmware crashes, the window
+    /// id every later `xdotool`/`import` call carries no longer resolves, and `import` in
+    /// particular prints "no window with specified ID exists" and then *blocks* until run()'s
+    /// timeout kills it — so the untreated failure reads as "import hung", which points at the
+    /// harness instead of at the crash that actually happened several steps earlier.
+    fn check_alive(&mut self) -> anyhow::Result<()> {
+        let Some(status) = self.simulator.try_wait().context("polling the simulator process")? else {
+            return Ok(());
+        };
+        let log = sim_common::simulator_log_path();
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        let mut tail: Vec<&str> = text.lines().rev().take(15).collect();
+        tail.reverse();
+        let tail = if tail.is_empty() { "(nothing captured)".to_string() } else { tail.join("\n") };
+        anyhow::bail!(
+            "the simulator exited ({status}) — the firmware crashed mid-flow; this is not a \
+             harness timeout. Last output ({}):\n{tail}",
+            log.display(),
+        )
+    }
+
+    fn navigate_to_export(&mut self, map: &ClickMap) -> anyhow::Result<()> {
         let (x, y) = map.point("home", "menu_button")?;
         sim_common::tap(&self.window_id, x, y)?;
         std::thread::sleep(Duration::from_millis(300));
@@ -184,7 +223,11 @@ impl SimHarness {
         let (x, y) = map.point("choose_wallet_filtered", "coin_entry")?;
         sim_common::tap(&self.window_id, x, y)?;
         std::thread::sleep(Duration::from_millis(500));
-        Ok(())
+        // Building the export UR is the heaviest thing this flow asks the firmware to do (every
+        // NEAR xpub the device holds, CBOR-encoded and fountain-split), and it is where
+        // GuiGetNearWalletData once overflowed its key array — so confirm the device survived
+        // arriving here before the caller starts screenshotting a window that may be gone.
+        self.check_alive()
     }
 }
 
@@ -219,10 +262,12 @@ fn ur_type_of(frame: &str) -> anyhow::Result<String> {
 }
 
 fn scan_until_complete(
-    window_id: &str,
+    harness: &mut SimHarness,
     region: (i32, i32, u32, u32),
     debug_frames: Option<&Path>,
 ) -> anyhow::Result<String> {
+    let window_id = harness.window_id.clone();
+    let window_id = window_id.as_str();
     let tmp = std::env::temp_dir().join("sim-device-scan.png");
     if let Some(dir) = debug_frames {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -232,7 +277,14 @@ fn scan_until_complete(
     let mut seen = 0u32;
     let mut captured = 0u32;
     loop {
-        sim_common::screenshot_crop(window_id, &tmp, region)?;
+        // A capture failure here is far more often a dead simulator than a broken `import`, and
+        // `import`'s own diagnostic for a vanished window is a 20s block — so ask the process
+        // itself first and report the crash, falling back to the raw capture error only if the
+        // firmware is genuinely still running.
+        if let Err(capture_err) = sim_common::screenshot_crop(window_id, &tmp, region) {
+            harness.check_alive()?;
+            return Err(capture_err);
+        }
         captured += 1;
         if let Some(dir) = debug_frames {
             let dest = dir.join(format!("frame_{captured:04}.png"));
@@ -300,11 +352,39 @@ fn cmd_export(map_path: &Path, debug_frames: Option<&Path>) -> anyhow::Result<()
     let map = ClickMap::load(map_path)?;
     let qr_region = map.region("connect_wallet", "qr_region")?;
     let ur = retry_once(|| {
-        let h = SimHarness::boot()?;
+        let mut h = SimHarness::boot()?;
         h.navigate_to_export(&map)?;
-        scan_until_complete(&h.window_id, qr_region, debug_frames)
+        scan_until_complete(&mut h, qr_region, debug_frames)
     })?;
     println!("{ur}");
+    Ok(())
+}
+
+fn cmd_pubkey(map_path: &Path, path: &str, debug_frames: Option<&Path>) -> anyhow::Result<()> {
+    let map = ClickMap::load(map_path)?;
+    let qr_region = map.region("connect_wallet", "qr_region")?;
+    let ur = retry_once(|| {
+        let mut h = SimHarness::boot()?;
+        h.navigate_to_export(&map)?;
+        scan_until_complete(&mut h, qr_region, debug_frames)
+    })?;
+
+    let decoded = probe_decode::<CryptoMultiAccounts>(ur).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let accounts = decoded.data.context("no data in crypto-multi-accounts UR")?;
+    let key = accounts
+        .get_keys()
+        .into_iter()
+        .find(|k| {
+            k.get_origin()
+                .and_then(|p| p.get_path())
+                .is_some_and(|p| p == path)
+        })
+        .with_context(|| format!("no key at path {path} in this export"))?;
+    let raw: [u8; 32] = key
+        .get_key()
+        .try_into()
+        .map_err(|b: Vec<u8>| anyhow::anyhow!("NEAR public key is {} bytes, expected 32", b.len()))?;
+    println!("ed25519:{}", bs58::encode(raw).into_string());
     Ok(())
 }
 
@@ -319,15 +399,18 @@ fn cmd_sign(map_path: &Path, ur: &str, debug_frames: Option<&Path>) -> anyhow::R
     let qr_region = map.region("sign_response", "qr_region")?;
 
     let signature_ur = retry_once(|| {
-        let h = SimHarness::boot()?;
+        let mut h = SimHarness::boot()?;
         sim_common::tap(&h.window_id, scan_x, scan_y)?;
         std::thread::sleep(Duration::from_millis(1000));
         sim_common::swipe(&h.window_id, swipe_from, swipe_to, 12)?;
         std::thread::sleep(Duration::from_millis(500));
         sim_common::reauth_pin(&h.window_id, PROVISION_PIN)?;
         std::thread::sleep(Duration::from_millis(500));
+        // Parsing and rendering the sign request, then signing it, is the other place the firmware
+        // does real work under this harness — same reasoning as navigate_to_export's check.
+        h.check_alive()?;
 
-        scan_until_complete(&h.window_id, qr_region, debug_frames)
+        scan_until_complete(&mut h, qr_region, debug_frames)
     })?;
     println!("{signature_ur}");
     Ok(())
@@ -338,6 +421,7 @@ fn main() -> anyhow::Result<()> {
         Command::Provision { coin } => cmd_provision(&coin),
         Command::DecodeFrame { path } => cmd_decode_frame(&path),
         Command::Export { map, debug_frames } => cmd_export(&map, debug_frames.as_deref()),
+        Command::Pubkey { map, path, debug_frames } => cmd_pubkey(&map, &path, debug_frames.as_deref()),
         Command::Sign { map, ur, debug_frames } => cmd_sign(&map, &ur, debug_frames.as_deref()),
     }
 }

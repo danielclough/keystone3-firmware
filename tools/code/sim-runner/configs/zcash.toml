@@ -26,12 +26,12 @@ resolution = { w = 480, h = 800 }
 coin_tile = { x = 128, y = 208 }
 menu_button = { x = 438, y = 96 }
 scan_button = { x = 388, y = 710 }
-reference = "reference/home.png"
+reference = "reference/zcash/home.png"
 
 [screens.home_menu]
 # Bottom sheet opened by `home.menu_button`.
 connect_software_wallet = { x = 227, y = 650 }
-reference = "reference/home_menu.png"
+reference = "reference/zcash/home_menu.png"
 
 [screens.choose_wallet]
 # The unfiltered "All" wallet list. Keystone Nexus (first entry, `choose_wallet_filtered
@@ -40,7 +40,7 @@ reference = "reference/home_menu.png"
 # tapped anyway to match the exact call sequence `sim_device export`'s `navigate_to_export` uses,
 # and it does not move Keystone Nexus's position in the list.
 chain_filter_more = { x = 413, y = 173 }
-reference = "reference/choose_wallet.png"
+reference = "reference/zcash/choose_wallet.png"
 
 [screens.choose_wallet_filtered]
 # Same on-screen position as Keystone Nexus in the unfiltered list (see note above) — this entry
@@ -60,7 +60,7 @@ coin_entry = { x = 240, y = 252 }
 # while debugging this). Fixed in `sim_device.rs` via `normalise_ur` (lowercases every frame
 # before `ur::decode`/`Decoder::receive`) — a general fix, not specific to ZEC or this map.
 qr_region = { x = 72, y = 222, w = 336, h = 336 }
-reference = "reference/connect_wallet.png"
+reference = "reference/zcash/connect_wallet.png"
 
 [screens.receive_zec]
 # Reached via `home.coin_tile`, not part of the connect/sign flow `sim_device` drives — captured
@@ -68,10 +68,10 @@ reference = "reference/connect_wallet.png"
 # `sim_device` subcommand reads this screen today.
 close_button = { x = 42, y = 96 }
 qr_region = { x = 72, y = 178, w = 336, h = 336 }
-reference = "reference/receive_zec.png"
+reference = "reference/zcash/receive_zec.png"
 
 [screens.scan]
 # Reached via `home.scan_button`. Coordinate-verified only (see file-level comment): confirms the
 # camera-scan prompt renders, but nothing past it has been exercised without a real UR.
 back_button = { x = 42, y = 96 }
-reference = "reference/scan_screen.png"
+reference = "reference/zcash/scan_screen.png"

@@ -1,18 +1,30 @@
 use crate::common::errors::RustCError;
-use crate::common::structs::{TransactionCheckResult, TransactionParseResult};
-use crate::common::types::{PtrBytes, PtrT, PtrUR};
+use crate::common::structs::{SimpleResponse, TransactionCheckResult, TransactionParseResult};
+use crate::common::types::{PtrBytes, PtrString, PtrT, PtrUR};
 use crate::common::ur::{UREncodeResult, FRAGMENT_MAX_LENGTH_DEFAULT};
+use crate::common::utils::{convert_c_char, recover_c_char};
 use crate::extract_array;
 use crate::extract_ptr_with_type;
 use alloc::string::ToString;
 use alloc::{format, vec};
 use app_near::errors::NearError;
+use cty::c_char;
 use structs::DisplayNearTx;
 use ur_registry::near::near_sign_request::NearSignRequest;
 use ur_registry::near::near_signature::NearSignature;
 use ur_registry::traits::RegistryItem;
 
 pub mod structs;
+
+// A NEAR implicit account ID is the lowercase-hex ed25519 public key
+// (https://docs.near.org/concepts/protocol/account-id#implicit-address), and
+// `GetCurrentAccountPublicKey` already returns that hex encoding for ED25519
+// xpub types (see `get_ed25519_pubkey_by_seed` in `rust_c/src/common/mod.rs`).
+#[no_mangle]
+pub unsafe extern "C" fn near_get_address(pubkey: PtrString) -> *mut SimpleResponse<c_char> {
+    let pubkey = recover_c_char(pubkey);
+    SimpleResponse::success(convert_c_char(pubkey.to_lowercase()) as *mut c_char).simple_c_ptr()
+}
 
 unsafe fn build_sign_result(ptr: PtrUR, seed: &[u8]) -> Result<NearSignature, NearError> {
     let sign_request = extract_ptr_with_type!(ptr, NearSignRequest);

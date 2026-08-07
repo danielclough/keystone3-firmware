@@ -23,6 +23,7 @@
 #include "gui_ton.h"
 #include "gui_avax.h"
 #include "gui_iota.h"
+#include "gui_near.h"
 #else
 #include "gui_monero.h"
 #endif
@@ -36,6 +37,7 @@ typedef enum {
 #ifdef WEB3_VERSION
     CHAIN_ETH,
     CHAIN_SOL,
+    CHAIN_NEAR,
     CHAIN_BNB,
     CHAIN_HNT,
     CHAIN_XRP,
@@ -122,6 +124,7 @@ typedef enum {
     REMAPVIEW_SUI_SIGN_MESSAGE_HASH,
     REMAPVIEW_SOL,
     REMAPVIEW_SOL_MESSAGE,
+    REMAPVIEW_NEAR,
     REMAPVIEW_IOTA,
     REMAPVIEW_IOTA_SIGN_MESSAGE_HASH,
     REMAPVIEW_APT,

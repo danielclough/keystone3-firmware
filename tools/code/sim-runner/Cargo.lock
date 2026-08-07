@@ -996,6 +996,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bip39",
+ "bs58",
  "clap",
  "image",
  "keystone-ur",
@@ -1004,6 +1005,7 @@ dependencies = [
  "serde_json",
  "toml",
  "ur-parse-lib",
+ "ur-registry",
 ]
 
 [[package]]
