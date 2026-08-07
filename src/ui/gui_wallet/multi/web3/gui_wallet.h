@@ -22,6 +22,7 @@ UREncodeResult *GuiGetIotaWalletData(void);
 UREncodeResult *GuiGetPetraData(void);
 UREncodeResult *GuiGetSolflareData(void);
 UREncodeResult *GuiGetHeliumData(void);
+UREncodeResult *GuiGetNearWalletData(void);
 UREncodeResult *GuiGetXBullData(void);
 UREncodeResult *GuiGetBackpackData(void);
 UREncodeResult *GuiGetXrpToolkitDataByIndex(uint16_t index);

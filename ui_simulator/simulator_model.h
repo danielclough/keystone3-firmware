@@ -168,6 +168,13 @@ extern bool g_reboot;
         FreeSolMemory, \
     }, \
     { \
+        REMAPVIEW_NEAR, \
+        PC_SIMULATOR_PATH "/page_near.json", \
+        GuiGetNearData, \
+        NULL, \
+        FreeNearMemory, \
+    }, \
+    { \
         REMAPVIEW_APT, \
         PC_SIMULATOR_PATH "/page_eth.json", \
         GuiGetAptosData, \
