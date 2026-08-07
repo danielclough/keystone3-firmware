@@ -1,0 +1,26 @@
+[package]
+name = "sim_runner"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "sim_map"
+path = "src/bin/sim_map.rs"
+
+[[bin]]
+name = "sim_device"
+path = "src/bin/sim_device.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
+ur-parse-lib = { version = "1.0.8", default-features = false, features = ["std"] }
+ur = { package = "keystone-ur", version = "0.1.0", default-features = false }
+bip39 = { version = "2.2", default-features = false, features = ["std"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+rqrr = "0.7"

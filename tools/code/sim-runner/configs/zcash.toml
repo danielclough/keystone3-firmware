@@ -1,0 +1,77 @@
+# Zcash (ZEC) click-map, tapped and verified against a real, freshly-provisioned
+# (`sim_device provision --coin ZEC`) simulator instance — every coordinate below was reached by
+# tap -> `sim_map shot` -> visual confirmation before being recorded, not guessed.
+#
+# PIN entry (initial unlock and reauth-before-sign) is NOT part of this file: both
+# `sim_common::pin` and `sim_common::reauth_pin` use fixed digit-grid coordinates shared across
+# every coin (see `src/common.rs`), so there is no `pin_pad`/`reauth_pin_pad` table to fill in
+# here — confirmed identical to NEAR's chrome by using the same unlock flow throughout this
+# session with no adjustment needed.
+#
+# `sign_confirm.swipe_from`/`swipe_to` and `sign_response.qr_region` are NOT yet in this file: no
+# real Zcash sign-request UR is available yet, so the confirm/sign screens beyond the bare scan
+# prompt (`reference/scan_screen.png`) have not been driven end-to-end. `home.scan_button` and the
+# scan screen itself ARE coordinate-verified (tapping it reaches the camera-scan prompt cleanly),
+# but nothing past that point is captured — a later session with a real ZEC sign-request UR must
+# fill in `sign_confirm`/`sign_response` and confirm the reauth PIN pad along that path.
+
+resolution = { w = 480, h = 800 }
+
+[screens.home]
+# The ZEC balance tile — opens the "Receive ZEC" QR/address view (reference/receive_zec.png).
+# Exercising this tile is what surfaced the use-after-free in USE_AFTER_FREE_FIX_PR.md via a
+# second path (XPub generation for the receive-address view, not just the export flow) — see that
+# file for the crash/fix writeup. Verified end-to-end: this repo's simulator is built from a
+# checkout that already carries the fix, so this tap now completes cleanly.
+coin_tile = { x = 128, y = 208 }
+menu_button = { x = 438, y = 96 }
+scan_button = { x = 388, y = 710 }
+reference = "reference/zcash/home.png"
+
+[screens.home_menu]
+# Bottom sheet opened by `home.menu_button`.
+connect_software_wallet = { x = 227, y = 650 }
+reference = "reference/zcash/home_menu.png"
+
+[screens.choose_wallet]
+# The unfiltered "All" wallet list. Keystone Nexus (first entry, `choose_wallet_filtered
+# .coin_entry` below) already lists ZEC among its supported networks, so the coin-specific tab
+# filters (BTC/ETH/SOL/ADA) were not needed for ZEC — `chain_filter_more` (the "..." tab) was
+# tapped anyway to match the exact call sequence `sim_device export`'s `navigate_to_export` uses,
+# and it does not move Keystone Nexus's position in the list.
+chain_filter_more = { x = 413, y = 173 }
+reference = "reference/zcash/choose_wallet.png"
+
+[screens.choose_wallet_filtered]
+# Same on-screen position as Keystone Nexus in the unfiltered list (see note above) — this entry
+# supports ZEC (confirmed by the Z icon under "Supported Networks" on the resulting
+# `connect_wallet` screen).
+coin_entry = { x = 240, y = 252 }
+
+[screens.connect_wallet]
+# "Connect Keystone Nexus" export QR screen. Verified end-to-end: `sim_device export --map
+# configs/zcash.toml` reassembles the animated multi-part QR (a `ur:crypto-multi-accounts/...`
+# UR, 11 fragments) into a complete UR. Getting this working surfaced a real coin-agnostic bug in
+# `sim_device` itself, not anything specific to this map: Keystone renders its export/signature
+# QRs in UPPERCASE (denser QR alphanumeric mode), but `ur::decode`/`ur::Decoder` only accept the
+# lowercase `ur:` scheme — every captured frame was silently rejected with "Invalid scheme" before
+# reassembly ever began, which looked identical to a mis-aimed crop region until a frame was
+# decoded and printed directly (see the new `sim_device decode-frame <png>` subcommand, added
+# while debugging this). Fixed in `sim_device.rs` via `normalise_ur` (lowercases every frame
+# before `ur::decode`/`Decoder::receive`) — a general fix, not specific to ZEC or this map.
+qr_region = { x = 72, y = 222, w = 336, h = 336 }
+reference = "reference/zcash/connect_wallet.png"
+
+[screens.receive_zec]
+# Reached via `home.coin_tile`, not part of the connect/sign flow `sim_device` drives — captured
+# for completeness and because it's the screen that surfaced the use-after-free above. No
+# `sim_device` subcommand reads this screen today.
+close_button = { x = 42, y = 96 }
+qr_region = { x = 72, y = 178, w = 336, h = 336 }
+reference = "reference/zcash/receive_zec.png"
+
+[screens.scan]
+# Reached via `home.scan_button`. Coordinate-verified only (see file-level comment): confirms the
+# camera-scan prompt renders, but nothing past it has been exercised without a real UR.
+back_button = { x = 42, y = 96 }
+reference = "reference/zcash/scan_screen.png"
