@@ -32,7 +32,7 @@
 |:---------|:------------------------------------------------------|:--------------------------------------------------------------|
 | overview | [DisplayNearTxOverview](#display_near_tx_overview) \* | the specific values on overview page                          |
 | detail   | char \*                                               | the [json string](#detail_json_string_example) on detail page |
-| network  | char \*                                               | network text, "Near Mainnet"                                  |
+| network  | char \*                                               | network text, "NEAR" — a NEAR transaction carries no chain-id, so this is not (and cannot be) "Mainnet" vs. "Testnet" |
 
 ### <a id="display_near_tx_overview">DisplayNearTxOverview</a>
 

@@ -30,7 +30,14 @@ impl ParsedNearTx {
             display_type,
             overview: parsed_overview,
             detail: parsed_detail,
-            network: "Near Mainnet".to_string(),
+            // A NEAR transaction, the NearSignRequest UR wrapping it, and the derivation path
+            // all carry no chain-id/network field (checked ur-registry-1.0.8's NearSignRequest:
+            // request_id, sign_data, derivation_path, account, origin — none of it) — so there
+            // is no data this device could use to say "Mainnet" or "Testnet" correctly. Every
+            // testnet transaction this project has ever signed was previously displayed as
+            // Mainnet (near-shopify/plan/01-near-actions.md, Deliverable 6.3), which is worse
+            // than saying nothing: stop claiming a specific network rather than guess one.
+            network: "NEAR".to_string(),
         })
     }
 
@@ -98,6 +105,19 @@ mod tests {
     use serde_json::{json, Value};
     use ur_registry::near::near_sign_request::NearSignRequest;
     use {hex, serde_json};
+
+    #[test]
+    fn a_transaction_is_not_labelled_near_mainnet() {
+        // Nothing in a NEAR transaction, its NearSignRequest UR wrapper, or the derivation path
+        // says which network it's for (near-shopify/plan/01-near-actions.md, Deliverable 6.3) —
+        // this only pins that the device stopped claiming a specific one it cannot know.
+        let cbor_str = "a301d82550ed2ab5bb9cc24571b7dcbec9e5bc7b79028159016040000000333138323466626632343335666231656361346466633339373734313833636232356631336231303335326435643533323736313662353963333565616539660031824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f442d16f48e3f00003c000000613062383639393163363231386233366331643139643461326539656230636533363036656234382e666163746f72792e6272696467652e6e6561728db41252bff5ecc0b28f55fc078d1b2de23990f728fc762502688d340bb42c9301000000020b00000066745f7472616e73666572630000007b22616d6f756e74223a223232303030222c2272656365697665725f6964223a2230346361353938333132633631656464646165656531333035333938303366323931313464363534353537643330333066313561623533316335653730613264227d00e057eb481b00000100000000000000000000000000000003d90130a20186182cf519018df500f5021a707eed6c";
+        let near_sign_request = NearSignRequest::try_from(hex::decode(cbor_str).unwrap()).unwrap();
+        let sign_data = near_sign_request.get_sign_data();
+        let parsed = crate::parse(&sign_data[0]).unwrap();
+        assert_eq!(parsed.network, "NEAR");
+        assert_ne!(parsed.network, "Near Mainnet");
+    }
 
     #[test]
     fn test_parse_transaction_1() {
