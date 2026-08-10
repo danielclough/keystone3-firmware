@@ -26,3 +26,6 @@ bs58 = "0.5"
 bip39 = { version = "2.2", default-features = false, features = ["std"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rqrr = "0.7"
+# Screen-verification crops go to a temp file, never a fixed /tmp path: `make shop-e2e-sim` runs
+# suites in a loop and two of them comparing the same hardcoded filename would race.
+tempfile = "3"

@@ -63,6 +63,44 @@ enum Command {
         ur: String,
         #[arg(long)]
         debug_frames: Option<PathBuf>,
+        /// Save `sign_confirm`'s per-transaction field crops here. These are not compared against
+        /// a committed reference — the accounts and amounts differ every run, and this host has no
+        /// OCR — so a caller proves the device rendered *this* transaction by signing two
+        /// different ones and diffing the crops. See `shop-keystone-refusal.spec.ts`.
+        #[arg(long)]
+        field_shots: Option<PathBuf>,
+    },
+    /// Scans a sign request and then declines it on the device, the way an operator who reads the
+    /// confirm screen and does not like what it says would. Prints nothing: the *absence* of a
+    /// `near-signature` is the whole result, and exiting 0 asserts the device went back to `home`
+    /// without having signed.
+    ///
+    /// The NEAR confirm screen has no "Reject" button — the back chevron is the only way out — so
+    /// this is what "the operator refused" means on this firmware, not a mapped decline control.
+    Reject {
+        #[arg(long)]
+        map: PathBuf,
+        ur: String,
+    },
+    /// Walks every screen the click map names a `reference` crop for and either captures those
+    /// crops (`--capture`) or checks them. This is F8: without it a suite "running under the
+    /// simulator" proves only that taps landed at the mapped coordinates, never that the device
+    /// was showing the screen those coordinates were mapped against.
+    ///
+    /// The sign-flow screens are only reachable with a transaction to confirm, so `--ur` is what
+    /// extends the walk past `connect_wallet`. Omitting it covers the export path alone.
+    VerifyScreens {
+        #[arg(long)]
+        map: PathBuf,
+        #[arg(long)]
+        capture: bool,
+        #[arg(long)]
+        ur: Option<String>,
+        /// Dump an un-cropped screenshot of each screen here. Not part of verification -- this is
+        /// the tool for *choosing* a `reference_region` in the first place, and for seeing what
+        /// the device actually showed when a comparison fails.
+        #[arg(long)]
+        full_shots: Option<PathBuf>,
     },
 }
 
@@ -146,6 +184,15 @@ struct SimHarness {
 
 impl SimHarness {
     fn boot() -> anyhow::Result<Self> {
+        let mut harness = Self::boot_locked()?;
+        harness.unlock()?;
+        Ok(harness)
+    }
+
+    /// `boot` stopping short of entering the PIN. Only `verify-screens` wants this: `pin_pad` is
+    /// the one mapped screen that exists solely before unlock, so capturing or checking its
+    /// reference crop is impossible from a harness that always unlocks on the way up.
+    fn boot_locked() -> anyhow::Result<Self> {
         sim_common::restore_provisioned_assets()?;
 
         let xvfb = sim_common::spawn_detached(
@@ -183,9 +230,13 @@ impl SimHarness {
              LVGL's C: fs driver silently can't find ui_simulator/assets and black-screens",
         )?;
 
-        sim_common::pin(&harness.window_id, PROVISION_PIN).context("unlocking with the provisioned PIN")?;
-        std::thread::sleep(Duration::from_millis(300));
         Ok(harness)
+    }
+
+    fn unlock(&mut self) -> anyhow::Result<()> {
+        sim_common::pin(&self.window_id, PROVISION_PIN).context("unlocking with the provisioned PIN")?;
+        std::thread::sleep(Duration::from_millis(300));
+        Ok(())
     }
 
     /// Fails if the simulator has exited, quoting its log. Every UI step below funnels through
@@ -210,19 +261,24 @@ impl SimHarness {
         )
     }
 
+    /// Tap a mapped point, but only after confirming the device is on the screen that point was
+    /// mapped against. Without the check a drifted UI still "passes": the tap lands at the old
+    /// coordinates regardless, and the failure surfaces several steps later as an unrelated
+    /// timeout.
+    fn tap_on(&mut self, map: &ClickMap, screen: &str, field: &str, settle_ms: u64) -> anyhow::Result<()> {
+        map.verify_screen(&self.window_id, screen)?;
+        let (x, y) = map.point(screen, field)?;
+        sim_common::tap(&self.window_id, x, y)?;
+        std::thread::sleep(Duration::from_millis(settle_ms));
+        Ok(())
+    }
+
     fn navigate_to_export(&mut self, map: &ClickMap) -> anyhow::Result<()> {
-        let (x, y) = map.point("home", "menu_button")?;
-        sim_common::tap(&self.window_id, x, y)?;
-        std::thread::sleep(Duration::from_millis(300));
-        let (x, y) = map.point("home_menu", "connect_software_wallet")?;
-        sim_common::tap(&self.window_id, x, y)?;
-        std::thread::sleep(Duration::from_millis(500));
-        let (x, y) = map.point("choose_wallet", "chain_filter_more")?;
-        sim_common::tap(&self.window_id, x, y)?;
-        std::thread::sleep(Duration::from_millis(300));
-        let (x, y) = map.point("choose_wallet_filtered", "coin_entry")?;
-        sim_common::tap(&self.window_id, x, y)?;
-        std::thread::sleep(Duration::from_millis(500));
+        self.tap_on(map, "home", "menu_button", 300)?;
+        self.tap_on(map, "home_menu", "connect_software_wallet", 500)?;
+        self.tap_on(map, "choose_wallet", "chain_filter_more", 300)?;
+        self.tap_on(map, "choose_wallet_filtered", "coin_entry", 500)?;
+        map.verify_screen(&self.window_id, "connect_wallet")?;
         // Building the export UR is the heaviest thing this flow asks the firmware to do (every
         // NEAR xpub the device holds, CBOR-encoded and fountain-split), and it is where
         // GuiGetNearWalletData once overflowed its key array — so confirm the device survived
@@ -388,7 +444,12 @@ fn cmd_pubkey(map_path: &Path, path: &str, debug_frames: Option<&Path>) -> anyho
     Ok(())
 }
 
-fn cmd_sign(map_path: &Path, ur: &str, debug_frames: Option<&Path>) -> anyhow::Result<()> {
+fn cmd_sign(
+    map_path: &Path,
+    ur: &str,
+    debug_frames: Option<&Path>,
+    field_shots: Option<&Path>,
+) -> anyhow::Result<()> {
     std::fs::write(sim_common::assets_dir().join("qrcode_data.txt"), format!("{ur}\n"))
         .context("writing qrcode_data.txt")?;
 
@@ -400,10 +461,23 @@ fn cmd_sign(map_path: &Path, ur: &str, debug_frames: Option<&Path>) -> anyhow::R
 
     let signature_ur = retry_once(|| {
         let mut h = SimHarness::boot()?;
+        map.verify_screen(&h.window_id, "home")?;
         sim_common::tap(&h.window_id, scan_x, scan_y)?;
         std::thread::sleep(Duration::from_millis(1000));
+        // The claim this whole backend exists to support: the device was showing its own confirm
+        // screen at the moment the approving swipe happened (CLAUDE.md's I3). Asserted here, on
+        // the real signing path, not only in `verify-screens`.
+        map.verify_screen(&h.window_id, "sign_confirm")?;
+        if let Some(dir) = field_shots {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+            for field in ["field_from", "field_to", "field_action"] {
+                let region = map.region("sign_confirm", field)?;
+                sim_common::screenshot_crop(&h.window_id, &dir.join(format!("{field}.png")), region)?;
+            }
+        }
         sim_common::swipe(&h.window_id, swipe_from, swipe_to, 12)?;
         std::thread::sleep(Duration::from_millis(500));
+        map.verify_screen(&h.window_id, "reauth_pin_pad")?;
         sim_common::reauth_pin(&h.window_id, PROVISION_PIN)?;
         std::thread::sleep(Duration::from_millis(500));
         // Parsing and rendering the sign request, then signing it, is the other place the firmware
@@ -416,12 +490,196 @@ fn cmd_sign(map_path: &Path, ur: &str, debug_frames: Option<&Path>) -> anyhow::R
     Ok(())
 }
 
+/// Capture or check one screen's reference crop, and optionally dump the whole window alongside.
+/// Threaded through every step of `cmd_verify_screens` so that capture and verify walk *exactly*
+/// the same navigation -- a capture taken from a different route would bake the wrong screen into
+/// the reference and quietly make the check meaningless.
+fn visit_screen(
+    harness: &mut SimHarness,
+    map: &ClickMap,
+    screen: &str,
+    capture: bool,
+    full_shots: Option<&Path>,
+) -> anyhow::Result<()> {
+    harness.check_alive()?;
+    if let Some(dir) = full_shots {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        sim_common::screenshot(&harness.window_id, &dir.join(format!("{screen}.png")))?;
+    }
+    if capture {
+        let out = map.capture_screen(&harness.window_id, screen)?;
+        println!("captured {screen} -> {}", out.display());
+    } else {
+        map.verify_screen(&harness.window_id, screen)?;
+        println!("ok {screen}");
+    }
+    Ok(())
+}
+
+fn cmd_reject(map_path: &Path, ur: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        ur.starts_with("ur:near-sign-request/"),
+        "--ur must be a ur:near-sign-request/... string, got {ur:?}"
+    );
+    std::fs::write(sim_common::assets_dir().join("qrcode_data.txt"), format!("{ur}\n"))
+        .context("writing qrcode_data.txt")?;
+
+    let map = ClickMap::load(map_path)?;
+    retry_once(|| {
+        let mut h = SimHarness::boot()?;
+        h.tap_on(&map, "home", "scan_button", 1000)?;
+        // Verified before *and* after the tap: before proves the operator was shown the real
+        // transaction (a refusal of a screen nobody saw proves nothing), after proves the device
+        // actually left the confirm screen rather than swallowing the tap.
+        h.tap_on(&map, "sign_confirm", "reject_button", 800)?;
+        h.check_alive()?;
+        map.verify_screen(&h.window_id, "home")
+            .context("after rejecting, the device did not return to its home screen")?;
+        Ok(())
+    })
+}
+
+/// `visit_screen`, except capture mode writes to `stage` instead of straight to the committed
+/// reference. The caller decides later whether the flow earned the right to overwrite it.
+fn stage_or_verify(
+    harness: &mut SimHarness,
+    map: &ClickMap,
+    screen: &str,
+    capture: bool,
+    full_shots: Option<&Path>,
+    stage: &Path,
+) -> anyhow::Result<()> {
+    harness.check_alive()?;
+    if let Some(dir) = full_shots {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        sim_common::screenshot(&harness.window_id, &dir.join(format!("{screen}.png")))?;
+    }
+    if capture {
+        sim_common::screenshot_crop(&harness.window_id, stage, map.reference_region(screen)?)?;
+    } else {
+        map.verify_screen(&harness.window_id, screen)?;
+        println!("ok {screen}");
+    }
+    Ok(())
+}
+
+fn cmd_verify_screens(
+    map_path: &Path,
+    capture: bool,
+    ur: Option<&str>,
+    full_shots: Option<&Path>,
+) -> anyhow::Result<()> {
+    // Capture mode is the one caller allowed to load a map whose crops do not exist yet -- that
+    // is the state it exists to fix. Verify mode goes through `load`, so a missing crop fails
+    // here rather than being silently skipped.
+    let map = if capture {
+        ClickMap::load_without_references(map_path)?
+    } else {
+        ClickMap::load(map_path)?
+    };
+
+    {
+        let mut h = SimHarness::boot_locked()?;
+        visit_screen(&mut h, &map, "pin_pad", capture, full_shots)?;
+        h.unlock()?;
+        visit_screen(&mut h, &map, "home", capture, full_shots)?;
+
+        let (x, y) = map.point("home", "menu_button")?;
+        sim_common::tap(&h.window_id, x, y)?;
+        std::thread::sleep(Duration::from_millis(300));
+        visit_screen(&mut h, &map, "home_menu", capture, full_shots)?;
+
+        let (x, y) = map.point("home_menu", "connect_software_wallet")?;
+        sim_common::tap(&h.window_id, x, y)?;
+        std::thread::sleep(Duration::from_millis(500));
+        visit_screen(&mut h, &map, "choose_wallet", capture, full_shots)?;
+
+        let (x, y) = map.point("choose_wallet", "chain_filter_more")?;
+        sim_common::tap(&h.window_id, x, y)?;
+        std::thread::sleep(Duration::from_millis(300));
+        visit_screen(&mut h, &map, "choose_wallet_filtered", capture, full_shots)?;
+
+        let (x, y) = map.point("choose_wallet_filtered", "coin_entry")?;
+        sim_common::tap(&h.window_id, x, y)?;
+        std::thread::sleep(Duration::from_millis(500));
+        visit_screen(&mut h, &map, "connect_wallet", capture, full_shots)?;
+    }
+
+    // The sign screens need a transaction on the device, and the export flow above has no way
+    // back to `home` -- so this is a second boot rather than more taps. Cheaper than mapping a
+    // back-navigation path that nothing else would ever use.
+    let Some(ur) = ur else {
+        eprintln!("no --ur given: sign_confirm / reauth_pin_pad / sign_response were not visited");
+        return Ok(());
+    };
+    // A blank or non-sign-request `--ur` leaves the device sitting on its scanner viewfinder, and
+    // capture mode would then happily commit *that* as the "confirm screen" reference — after
+    // which every later run verifies against a picture of a viewfinder and the whole check is
+    // worthless. It has already happened once during this file's own bring-up.
+    anyhow::ensure!(
+        ur.starts_with("ur:near-sign-request/"),
+        "--ur must be a ur:near-sign-request/... string, got {ur:?}"
+    );
+    std::fs::write(sim_common::assets_dir().join("qrcode_data.txt"), format!("{ur}\n"))
+        .context("writing qrcode_data.txt")?;
+
+    // Sign-flow crops are staged and only committed once the device has actually produced a
+    // signature. Same reasoning as the check above, applied to every way the flow can go wrong
+    // that a UR-prefix check cannot see: if no `near-signature` comes back, whatever those three
+    // screens were showing was not the sign flow, and must not become the reference.
+    let staged = tempfile::tempdir().context("staging directory for sign-flow crops")?;
+    let stage = |screen: &str| staged.path().join(format!("{screen}.png"));
+
+    let mut h = SimHarness::boot()?;
+    let (x, y) = map.point("home", "scan_button")?;
+    sim_common::tap(&h.window_id, x, y)?;
+    std::thread::sleep(Duration::from_millis(1000));
+    stage_or_verify(&mut h, &map, "sign_confirm", capture, full_shots, &stage("sign_confirm"))?;
+
+    let swipe_from = map.point("sign_confirm", "swipe_from")?;
+    let swipe_to = map.point("sign_confirm", "swipe_to")?;
+    sim_common::swipe(&h.window_id, swipe_from, swipe_to, 12)?;
+    std::thread::sleep(Duration::from_millis(500));
+    stage_or_verify(&mut h, &map, "reauth_pin_pad", capture, full_shots, &stage("reauth_pin_pad"))?;
+
+    sim_common::reauth_pin(&h.window_id, PROVISION_PIN)?;
+    std::thread::sleep(Duration::from_millis(800));
+    stage_or_verify(&mut h, &map, "sign_response", capture, full_shots, &stage("sign_response"))?;
+
+    let qr_region = map.region("sign_response", "qr_region")?;
+    let signature = scan_until_complete(&mut h, qr_region, None)
+        .context("the sign flow produced no signature, so its screens were not the sign flow")?;
+    anyhow::ensure!(
+        signature.starts_with("ur:near-signature/"),
+        "expected a near-signature back, got {signature:?}"
+    );
+
+    if capture {
+        for screen in ["sign_confirm", "reauth_pin_pad", "sign_response"] {
+            let dest = map.reference_file_for(screen)?;
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(stage(screen), &dest)
+                .with_context(|| format!("committing {}", dest.display()))?;
+            println!("captured {screen} -> {}", dest.display());
+        }
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Provision { coin } => cmd_provision(&coin),
         Command::DecodeFrame { path } => cmd_decode_frame(&path),
         Command::Export { map, debug_frames } => cmd_export(&map, debug_frames.as_deref()),
         Command::Pubkey { map, path, debug_frames } => cmd_pubkey(&map, &path, debug_frames.as_deref()),
-        Command::Sign { map, ur, debug_frames } => cmd_sign(&map, &ur, debug_frames.as_deref()),
+        Command::Sign { map, ur, debug_frames, field_shots } => {
+            cmd_sign(&map, &ur, debug_frames.as_deref(), field_shots.as_deref())
+        }
+        Command::Reject { map, ur } => cmd_reject(&map, &ur),
+        Command::VerifyScreens { map, capture, ur, full_shots } => {
+            cmd_verify_screens(&map, capture, ur.as_deref(), full_shots.as_deref())
+        }
     }
 }
