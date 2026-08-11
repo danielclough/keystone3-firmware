@@ -906,8 +906,13 @@ mod tests {
     /// The cross-implementation check: this exact vector is also pinned in
     /// `near_tx::tx::render_tests::a_deterministic_address_matches_the_one_near_cli_derives`
     /// (near_tx/src/tx.rs) — captured from near-cli-rs 0.29.0's own NEP-616 derivation. Both
-    /// sides hardcode the same bytes with a comment pointing at the other; a real shared-fixture
-    /// file neither crate has today is noted as follow-up in the phase-01 plan document.
+    /// sides hardcode the same bytes with a comment pointing at the other, deliberately, not via
+    /// a shared file: this crate is a vendored, independently-owned submodule and must never gain
+    /// a build/test dependency reaching outside its own tree, and the vector itself is a
+    /// permanent regression pin with no planned recapture (ongoing near-cli-rs drift is instead
+    /// caught continuously by `make tx-oracle`, which runs differentially against near-cli-rs's
+    /// current version on every run) — so a shared file would only add path/ownership complexity
+    /// with nothing to keep in sync. See near-shopify/plan/01-near-actions.md Deliverable 6.5.
     #[test]
     fn a_state_init_computes_the_same_address_near_tx_derives() {
         let code_hash: [u8; 32] = {
