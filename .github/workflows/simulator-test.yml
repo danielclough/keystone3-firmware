@@ -1,0 +1,46 @@
+on:
+  workflow_run:
+    workflows: ["Build Simulator"]
+    types: [completed]
+
+name: Test Simulator
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  test-simulator:
+    name: Smoke Test Simulator (Linux)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download simulator artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: simulator-linux
+          path: build
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Install runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-2.0-0 xvfb
+
+      - name: Run simulator smoke test
+        run: |
+          chmod +x build/simulator
+          xvfb-run --auto-servernum build/simulator &
+          pid=$!
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "simulator exited within 5s of startup"
+            exit 1
+          fi
+          kill "$pid"
