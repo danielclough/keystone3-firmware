@@ -1,6 +1,6 @@
 use crate::account_id::AccountId;
 use crate::crypto::PublicKey;
-use crate::parser::utils::{format_gas_amount, format_u128_amount};
+use crate::parser::utils::{format_call_args, format_gas_amount, format_method, format_u128_amount};
 use crate::primitives_core::account::AccessKey;
 use crate::primitives_core::hash::{hash, CryptoHash};
 
@@ -158,9 +158,9 @@ impl fmt::Debug for DeployContractAction {
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct FunctionCallAction {
-    #[serde(rename = "Method")]
+    #[serde(serialize_with = "format_method", rename = "Method")]
     pub method_name: String,
-    #[serde(skip_serializing)]
+    #[serde(serialize_with = "format_call_args", rename = "Args")]
     pub args: Vec<u8>,
     #[serde(serialize_with = "format_gas_amount", rename = "Prepaid Gas")]
     pub gas: Gas,

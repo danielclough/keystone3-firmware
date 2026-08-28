@@ -8,7 +8,9 @@ use crate::errors::{NearError, Result};
 use crate::parser::overview::{NearTxOverview, NearTxOverviewGeneral, NearTxOverviewTransfer};
 use crate::parser::structs::{NearTxDisplayType, ParsedNearTx};
 use crate::parser::transaction::{Action, Normalizer, Transaction};
+use crate::parser::utils::args_display;
 use crate::parser::utils::format_amount;
+use crate::parser::utils::sanitize_display;
 use crate::parser::utils::Merge;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -88,7 +90,28 @@ impl ParsedNearTx {
     }
 
     fn build_general_overview(tx: &Transaction) -> Result<NearTxOverview> {
-        let action_list = tx.actions.iter().map(|action| action.normalize()).collect();
+        let action_list = tx
+            .actions
+            .iter()
+            .map(|action| match action {
+                // A function call's operator-relevant content is its `args` (a token transfer's
+                // recipient and amount, a swap's parameters), which the bare "Function Call" label
+                // hides. Surface method + args here, on the Overview — the screen the operator reads
+                // first — so two calls differing only in args no longer render identically. Mirrors
+                // Solana's general overview, which lists each instruction's program and data.
+                // Both the method and the args are attacker-controlled and freeform, so both are run
+                // through sanitize_display: control characters (a newline especially, which could
+                // forge extra "Method:"/"Args:" lines in this multi-line label) become spaces.
+                // args_display already sanitises, so only the method needs it here.
+                Action::FunctionCall(fc) => format!(
+                    "{}\nMethod: {}\nArgs: {}",
+                    fc.normalize(),
+                    sanitize_display(&fc.method_name),
+                    args_display(&fc.args),
+                ),
+                other => other.normalize(),
+            })
+            .collect();
         Ok(NearTxOverview::General(NearTxOverviewGeneral {
             from: tx.signer_id.to_string(),
             to: tx.receiver_id.to_string(),
@@ -137,7 +160,10 @@ mod tests {
                     overview.to
                 );
                 assert_eq!(1, overview.action_list.len());
-                assert_eq!("Function Call", overview.action_list[0]);
+                assert_eq!(
+                    "Function Call\nMethod: ft_transfer\nArgs: {\"amount\":\"22000\",\"receiver_id\":\"04ca598312c61edddaeee130539803f29114d654557d3030f15ab531c5e70a2d\"}",
+                    overview.action_list[0]
+                );
             }
             _ => panic!("error overview type"),
         };
@@ -151,6 +177,7 @@ mod tests {
                 "Action": "Function Call",
                 "Deposit Value": "1 Yocto",
                 "Method": "ft_transfer",
+                "Args": "{\"amount\":\"22000\",\"receiver_id\":\"04ca598312c61edddaeee130539803f29114d654557d3030f15ab531c5e70a2d\"}",
                 "Prepaid Gas": "30 TGas"
             }
         ]);
@@ -266,7 +293,11 @@ mod tests {
                 assert_eq!(8, overview.action_list.len());
                 assert_eq!("Create Account", overview.action_list[0]);
                 assert_eq!("Deploy Contract", overview.action_list[1]);
-                assert_eq!("Function Call", overview.action_list[2]);
+                assert_eq!(
+                    // [1, 2, 3] control bytes are sanitised to three spaces on the Overview too.
+                    format!("Function Call\nMethod: qqq\nArgs: {}", " ".repeat(3)),
+                    overview.action_list[2]
+                );
                 assert_eq!("Transfer", overview.action_list[3]);
                 assert_eq!("Stake", overview.action_list[4]);
                 assert_eq!("Add Key", overview.action_list[5]);
@@ -291,6 +322,8 @@ mod tests {
                 "Action": "Function Call",
                 "Deposit Value": "1000000 Yocto",
                 "Method": "qqq",
+                // [1, 2, 3] are control bytes, so sanitize_display renders them as three spaces.
+                "Args": "   ",
                 "Prepaid Gas": "0.000000001 TGas"
             },
             {
@@ -367,14 +400,17 @@ mod tests {
                 assert_eq!("test.near".to_string(), overview.from);
                 assert_eq!("whatever.near".to_string(), overview.to);
                 assert_eq!(1, overview.action_list.len());
-                assert_eq!("Function Call", overview.action_list[0]);
+                assert_eq!(
+                    "Function Call\nMethod: qqq\nArgs: {\"amount\":\"4700000000000000000000000\"}",
+                    overview.action_list[0]
+                );
             }
             _ => panic!("error overview type"),
         };
         let parsed_detail: Value = serde_json::from_str(parsed.detail.as_str()).unwrap();
         let expected_detail = json!([
             {"From":"test.near","To":"whatever.near"},
-            {"Action":"Function Call","Deposit Value":"3.4 NEAR","Method":"qqq","Prepaid Gas":"125 TGas"}]);
+            {"Action":"Function Call","Deposit Value":"3.4 NEAR","Method":"qqq","Args":"{\"amount\":\"4700000000000000000000000\"}","Prepaid Gas":"125 TGas"}]);
         assert_eq!(expected_detail, parsed_detail);
     }
 

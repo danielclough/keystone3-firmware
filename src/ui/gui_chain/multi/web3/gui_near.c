@@ -207,7 +207,13 @@ static void GuiShowNearTxGeneralOverview(lv_obj_t *parent, PtrT_DisplayNearTxOve
 
     for (int i = 0; i < general->size; i++) {
         label = lv_label_create(container);
+        // A function call's action string now carries its method and args over multiple lines
+        // (see build_general_overview) — so wrap it, like the From/To labels above, instead of
+        // letting a token transfer's recipient/amount run off the right edge. The action text is a
+        // %s argument, never the format string, so a `%` in the args stays literal.
         lv_label_set_text_fmt(label, "%d. %s", i + 1, general->data[i].action);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(label, 360);
         lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
         SetContentLableStyle(label);
         prev = label;

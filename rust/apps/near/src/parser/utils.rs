@@ -73,6 +73,53 @@ where
     serializer.serialize_str(&format_gas(*v))
 }
 
+/// Render a function call's `args` for the confirm screen. NEP-141/NEP-171 and essentially every
+/// NEAR contract call carries JSON here — e.g. `{"receiver_id":"…","amount":"…"}`, which is exactly
+/// the recipient and amount a token transfer must let the operator check — so valid UTF-8 is shown
+/// verbatim. Raw (borsh-encoded) args, which have no text form, fall back to hex so the field is
+/// never simply absent. This replaced `#[serde(skip_serializing)]`, which dropped `args` from the
+/// confirm screen entirely: a token transfer showed its method, gas and deposit but never who
+/// received the tokens or how many — two different `ft_transfer`s rendered an identical confirm
+/// screen (see keystone-guide-kit/security_lab/S-P2-CONFIRM-DIFFERENTIAL.md).
+pub fn format_call_args<S>(args: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&args_display(args))
+}
+
+/// serde serializer for a function call's `method_name` (`rename = "Method"`): sanitised the same
+/// way as `args`, so a control character in an attacker-chosen method name cannot misrepresent it
+/// on the Details tab either.
+pub fn format_method<S>(method: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&sanitize_display(method))
+}
+
+/// The text form of a function call's `args`, shared by the Details serializer above and the
+/// General Overview (`build_general_overview`): valid UTF-8 with control characters neutralised
+/// (see [`sanitize_display`]), hex otherwise. One definition so the two tabs never render the same
+/// bytes differently.
+pub fn args_display(args: &[u8]) -> String {
+    match core::str::from_utf8(args) {
+        Ok(text) => sanitize_display(text),
+        Err(_) => hex::encode(args), // hex is control-char-free by construction
+    }
+}
+
+/// Neutralise every control character (C0 `0x00–0x1F`, DEL `0x7F`, C1 `0x80–0x9F`) in text shown on
+/// the confirm screen by replacing it with a space. A function call's method and args are
+/// attacker-controlled and freeform: without this a newline could forge extra "Method:"/"Args:"
+/// lines on the Overview, and any other non-printing character could hide or misrepresent what is
+/// being signed. Address ids never need it — they are AccountId-validated to `[a-z0-9._-]`.
+pub fn sanitize_display(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 /// A sha256 summary for a code blob that must never be shown raw on the confirm screen (matches
 /// the existing precedent: `DeployContractAction`'s hand-written `Debug` hex-encodes rather than
 /// dumps `code`). Both ends of the hash are shown, per near-shopify/plan/01-near-actions.md
@@ -173,5 +220,36 @@ mod serde_json_value_updater_test {
         let value_b: Value = Value::String("b".to_string());
         value_a.merge(value_b.clone());
         assert_eq!(value_b.to_string(), value_a.to_string());
+    }
+}
+
+#[cfg(test)]
+mod args_sanitisation_test {
+    use super::*;
+    use alloc::format;
+
+    #[test]
+    fn every_control_character_becomes_a_space_and_printable_text_is_untouched() {
+        // One representative of each control band — C0 (NUL, TAB, LF, CR, ESC), DEL, C1 — plus
+        // printable text on either side. All seven controls collapse to spaces; nothing else moves.
+        let raw = "ok\u{0}\t\n\r\u{1b}\u{7f}\u{9b}end";
+        assert_eq!(sanitize_display(raw), format!("ok{}end", " ".repeat(7)));
+
+        // The JSON a real token transfer carries is entirely printable, so it is left byte-for-byte.
+        let json = r#"{"receiver_id":"alice.near","amount":"5000000"}"#;
+        assert_eq!(sanitize_display(json), json);
+    }
+
+    #[test]
+    fn args_display_sanitises_utf8_and_falls_back_to_hex() {
+        // Raw control bytes in otherwise-valid-UTF-8 args become spaces — they can neither forge a
+        // newline nor hide characters on the confirm screen.
+        assert_eq!(args_display(&[1, 2, 3]), "   ");
+        assert_eq!(
+            args_display(br#"{"receiver_id":"alice.near","amount":"5"}"#),
+            r#"{"receiver_id":"alice.near","amount":"5"}"#
+        );
+        // Non-UTF-8 args (a borsh-encoded contract call) render as hex, control-char-free already.
+        assert_eq!(args_display(&[0xff, 0x00, 0x01]), "ff0001");
     }
 }
