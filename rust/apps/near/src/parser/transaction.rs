@@ -316,9 +316,7 @@ pub enum GlobalContractIdentifier {
 impl Serialize for GlobalContractIdentifier {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            GlobalContractIdentifier::CodeHash(h) => {
-                serializer.serialize_str(&format!("hash {h}"))
-            }
+            GlobalContractIdentifier::CodeHash(h) => serializer.serialize_str(&format!("hash {h}")),
             GlobalContractIdentifier::AccountId(a) => {
                 serializer.serialize_str(&format!("account {a}"))
             }
@@ -468,7 +466,10 @@ impl Serialize for DeterministicStateInitAction {
         struct Shadow {
             #[serde(rename = "Address")]
             address: String,
-            #[serde(rename = "Deposit", serialize_with = "crate::parser::utils::format_u128_amount")]
+            #[serde(
+                rename = "Deposit",
+                serialize_with = "crate::parser::utils::format_u128_amount"
+            )]
             deposit: Balance,
             #[serde(rename = "Code")]
             code: String,
@@ -483,7 +484,8 @@ impl Serialize for DeterministicStateInitAction {
         // near-shopify/plan/00-foundations.md): the operator authorises funds to an address they
         // cannot see in the payload, so the confirm screen must derive it itself or the screen
         // is unapprovable (near-shopify/plan/01-near-actions.md, Deliverable 6.3).
-        let hash = keccak256(&borsh::BorshSerialize::try_to_vec(&self.state_init).unwrap_or_default());
+        let hash =
+            keccak256(&borsh::BorshSerialize::try_to_vec(&self.state_init).unwrap_or_default());
         let address = format!("0s{}", hex::encode(&hash[12..32]));
         let (data_entries, data_bytes) = (
             v1.data.len(),
@@ -573,7 +575,11 @@ impl BorshDeserialize for DelegateAction {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, borsh::maybestd::io::Error> {
         let sender_id = <AccountId as BorshDeserialize>::deserialize(buf)?;
         let receiver_id = <AccountId as BorshDeserialize>::deserialize(buf)?;
-        let len = read_capped_len(buf, MAX_DELEGATE_ACTIONS, "a delegate action's inner actions")?;
+        let len = read_capped_len(
+            buf,
+            MAX_DELEGATE_ACTIONS,
+            "a delegate action's inner actions",
+        )?;
         let mut actions = alloc::vec::Vec::with_capacity(len.min(64) as usize);
         for _ in 0..len {
             actions.push(NonDelegateAction::deserialize(buf)?);
@@ -708,7 +714,9 @@ mod tests {
     // -----------------------------------------------------------------------------------------
 
     fn a_public_key() -> PublicKey {
-        "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV".parse().unwrap()
+        "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV"
+            .parse()
+            .unwrap()
     }
 
     #[test]
@@ -916,9 +924,8 @@ mod tests {
     #[test]
     fn a_state_init_computes_the_same_address_near_tx_derives() {
         let code_hash: [u8; 32] = {
-            let v =
-                hex::decode("f2ca1bb6c7e907d06dafe4687e579fce76b37e4e93b7605022da52e6ccc26fd2")
-                    .unwrap();
+            let v = hex::decode("f2ca1bb6c7e907d06dafe4687e579fce76b37e4e93b7605022da52e6ccc26fd2")
+                .unwrap();
             v.try_into().unwrap()
         };
         let action = DeterministicStateInitAction {

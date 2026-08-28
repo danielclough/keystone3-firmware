@@ -15,6 +15,21 @@ endif()
 
 add_compile_definitions(HASH_AND_SALT_TEST_MODE)
 
+# ASan+UBSan instrumentation for the simulator, off by default (`-DSANITIZE=true` to enable).
+# The crash oracle in keystone-testkit's sim_runner builds with this on, so a heap overflow or
+# use-after-free fails loudly and deterministically rather than surviving until a stack canary or an
+# unmapped page happens to catch it — the way the gui_lock_widgets use-after-free only ever surfaced,
+# by coredump luck (USE_AFTER_FREE_FIX_PR.md). Applied through add_compile_options/add_link_options
+# so it reaches both the C translation units and the final executable link; this file is included
+# (CMakeLists.txt:345) before add_executable(simulator) (CMakeLists.txt:365), so these link options
+# are already in effect when that target is created. Leak detection is left to the harness's
+# ASAN_OPTIONS (the firmware is not written leak-clean, so LSan-on-exit would flag every run).
+option(SANITIZE "Build the simulator with AddressSanitizer + UBSan" OFF)
+if(SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 file(GLOB_RECURSE INCLUDES "ui_simulator/lv_drivers/*.h" "external/lvgl/*.h")
 file(GLOB_RECURSE SOURCES  "ui_simulator/lv_drivers/*.c")
 file(GLOB_RECURSE CRYPTO

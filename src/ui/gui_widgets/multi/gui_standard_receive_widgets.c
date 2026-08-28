@@ -918,7 +918,13 @@ static void OpenSwitchAddressHandler(lv_event_t *e)
 
 static void ModelGetAddress(uint32_t index, AddressDataItem_t *item)
 {
-    char hdPath[BUFFER_SIZE_128];
+    // Initialised, not merely declared: every branch below is expected to fill this in before the
+    // `strcpy_s(item->path, 32, hdPath)` at the end of this function, but `strcpy_s` here is
+    // `#define strcpy_s(dest, destsz, src) (strcpy(dest, src), 0)` (src/ram/user_memory.h) — the
+    // size is discarded — so a branch that forgets copies uninitialised stack into a 32-byte field
+    // until it happens to meet a NUL, smashing the caller's frame. That is exactly what the Zcash
+    // branch below used to do.
+    char hdPath[BUFFER_SIZE_128] = {'\0'};
     SimpleResponse_c_char *result = NULL;
 
 #ifdef CYPHERPUNK_VERSION
@@ -926,6 +932,10 @@ static void ModelGetAddress(uint32_t index, AddressDataItem_t *item)
         char ufvk[ZCASH_UFVK_BUFFER_SIZE] = {'\0'};
         GetZcashUFVK(GetCurrentAccountIndex(), ufvk);
 
+        // The account this firmware exports and signs for, and the path the receive screen should
+        // report. Fixed rather than indexed by `index`: Zcash has one account here, which is why
+        // the connect-wallet flow offers no derivation-path choice for it either.
+        snprintf_s(hdPath, BUFFER_SIZE_128, "m/32'/133'/0'");
         result = generate_zcash_default_address(ufvk);
     }
 #endif

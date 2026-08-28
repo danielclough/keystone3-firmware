@@ -93,7 +93,9 @@ pub fn format_code_summary(code: &[u8]) -> String {
 /// deployed the second way is a vault whose logic the store can silently change after a shopper
 /// has funded it — see near_tx/src/action.rs's `GlobalContractDeployMode` doc for the same
 /// rationale on the native side.
-pub fn deploy_mode_words(mode: &crate::parser::transaction::GlobalContractDeployMode) -> &'static str {
+pub fn deploy_mode_words(
+    mode: &crate::parser::transaction::GlobalContractDeployMode,
+) -> &'static str {
     use crate::parser::transaction::GlobalContractDeployMode;
     match mode {
         GlobalContractDeployMode::CodeHash => "Immutable (by code hash)",

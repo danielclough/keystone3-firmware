@@ -1,0 +1,6 @@
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/CMakeFiles/simulator.dir
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/CMakeFiles/edit_cache.dir
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/CMakeFiles/rebuild_cache.dir
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/rust/CMakeFiles/rust_c.dir
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/rust/CMakeFiles/edit_cache.dir
+/home/daniel/git/near-keystone/keystone3-firmware/build_cypherpunk_simulator/rust/CMakeFiles/rebuild_cache.dir

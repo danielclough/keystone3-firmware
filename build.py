@@ -54,6 +54,9 @@ def build_firmware(environment, options, bin_type):
         if option == "simulator":
             cmd += ' -DBUILD_TYPE=Simulator'
             cmd += ' -DCMAKE_BUILD_TYPE=Debug'
+        if option == "sanitize":
+            # ASan+UBSan; only meaningful together with `simulator` (see ui_simulator/simulator.cmake).
+            cmd += ' -DSANITIZE=true'
         # add more option here.
 
     cmd += " -DRU_SUPPORT=true"
