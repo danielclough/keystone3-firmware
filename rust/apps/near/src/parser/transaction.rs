@@ -160,7 +160,16 @@ impl fmt::Debug for DeployContractAction {
 pub struct FunctionCallAction {
     #[serde(serialize_with = "format_method", rename = "Method")]
     pub method_name: String,
-    #[serde(serialize_with = "format_call_args", rename = "Args")]
+    // Empty args (`deposit_and_stake`, `unstake_all`, `withdraw_all` carry none) would otherwise
+    // render a bare `"Args":""` on Details and a dangling `Args: ` line on the Overview — noise
+    // that reads as "there is an empty argument" rather than "this call takes no arguments".
+    // Suppress the field entirely when there is nothing to show; the Overview arm in
+    // parser/mod.rs mirrors this by omitting its `Args:` line for the same case.
+    #[serde(
+        serialize_with = "format_call_args",
+        skip_serializing_if = "Vec::is_empty",
+        rename = "Args"
+    )]
     pub args: Vec<u8>,
     #[serde(serialize_with = "format_gas_amount", rename = "Prepaid Gas")]
     pub gas: Gas,

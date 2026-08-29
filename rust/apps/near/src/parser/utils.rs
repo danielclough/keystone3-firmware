@@ -5,7 +5,7 @@ use serde::Serializer;
 use {cryptoxide, hex};
 
 pub const NEAR_THRESHOLD: u128 = 10000000000000000000;
-pub const NEAR_DIVIDER: f64 = 1_000_000_000_000_000_000_000_000f64;
+pub const YOCTO_PER_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 pub const GAS_DIVIDER: f64 = 1_000_000_000_000_f64;
 
 use serde_json;
@@ -42,9 +42,45 @@ fn merge(a: &mut Value, b: &Value) {
 
 pub fn format_amount(value: u128) -> String {
     if value > NEAR_THRESHOLD {
-        format!("{} {}", (value as f64).div(NEAR_DIVIDER), "NEAR")
+        format!("{} NEAR", format_near_units(value))
     } else {
-        format!("{} {}", value, "Yocto")
+        format!("{} Yocto", value)
+    }
+}
+
+/// Render a yoctoNEAR balance as an exact NEAR decimal — every digit, no floating point.
+///
+/// The previous `(value as f64) / 1e24` lost precision the instant `value` exceeded f64's 53-bit
+/// mantissa (~16 significant digits). A 1 NEAR transfer is 10^24 yocto, so its low ~9 digits
+/// vanished: two transfers differing by anything under ~2.7e8 yocto rounded to the *same* f64 and
+/// rendered an identical amount on the confirm screen — the amount-dust collision
+/// (keystone-guide-kit/security_lab/S-P2-CONFIRM-DIFFERENTIAL.md). The device signs the exact
+/// u128, so the screen must show the exact u128. Integer div/rem keeps every digit; trailing
+/// fractional zeros are trimmed so `3.4 NEAR` is not shown as `3.400000000000000000000000 NEAR`.
+fn format_near_units(yocto: u128) -> String {
+    let whole = yocto / YOCTO_PER_NEAR;
+    let frac = yocto % YOCTO_PER_NEAR;
+    if frac == 0 {
+        return format!("{whole}");
+    }
+    // 24-digit zero-padded fraction (10^24 yocto = 1 NEAR), trailing zeros trimmed.
+    let mut frac = format!("{frac:024}");
+    while frac.ends_with('0') {
+        frac.pop();
+    }
+    format!("{whole}.{frac}")
+}
+
+/// A function-call access key's allowance, rendered identically on the Overview and the Details
+/// tab. `None` is NEAR's encoding for an *unlimited* allowance, not a zero one: the previous
+/// `unwrap_or_default()` rendered it "0 Yocto", which reads as "this key can spend nothing" when it
+/// is in fact the most permissive value — and made an unlimited-allowance key render the same
+/// "0 Yocto" as a genuinely zero-allowance one, the same confirm-screen collision class as
+/// addkey-permission. Show the distinction.
+pub fn format_allowance(allowance: &Option<u128>) -> String {
+    match allowance {
+        Some(v) => format_amount(*v),
+        None => String::from("Unlimited"),
     }
 }
 
@@ -52,7 +88,7 @@ pub fn format_option_u128_amount<S>(v: &Option<u128>, serializer: S) -> Result<S
 where
     S: Serializer,
 {
-    serializer.serialize_str(&format_amount(v.unwrap_or_default()))
+    serializer.serialize_str(&format_allowance(v))
 }
 
 pub fn format_u128_amount<S>(v: &u128, serializer: S) -> Result<S::Ok, S::Error>
@@ -251,5 +287,44 @@ mod args_sanitisation_test {
         );
         // Non-UTF-8 args (a borsh-encoded contract call) render as hex, control-char-free already.
         assert_eq!(args_display(&[0xff, 0x00, 0x01]), "ff0001");
+    }
+}
+
+#[cfg(test)]
+mod amount_formatting_test {
+    use super::*;
+
+    // The device signs an exact u128; the confirm screen must show an exact u128. The old
+    // `(value as f64) / 1e24` collapsed both of these to the same f64 (1e24) and printed "1 NEAR"
+    // for each — the amount-dust confirm-screen collision (S-P2-CONFIRM-DIFFERENTIAL). Every
+    // distinct amount must render a distinct string.
+    #[test]
+    fn two_amounts_one_yocto_apart_render_distinct_strings() {
+        let a = format_amount(YOCTO_PER_NEAR + 1);
+        let b = format_amount(YOCTO_PER_NEAR + 2);
+        assert_eq!(a, "1.000000000000000000000001 NEAR");
+        assert_eq!(b, "1.000000000000000000000002 NEAR");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn whole_and_fractional_near_render_exactly_with_no_f64_artifacts() {
+        assert_eq!(format_amount(YOCTO_PER_NEAR), "1 NEAR");
+        assert_eq!(format_amount(250 * YOCTO_PER_NEAR), "250 NEAR");
+        // The values the existing cbor fixtures pin, reproduced by exact div/rem.
+        assert_eq!(format_amount(1_250_000_000_000_000_000_000), "0.00125 NEAR");
+        assert_eq!(format_amount(3_400_000_000_000_000_000_000_000), "3.4 NEAR");
+        // At/below the threshold the amount stays in yocto, unrounded.
+        assert_eq!(format_amount(123), "123 Yocto");
+        assert_eq!(format_amount(NEAR_THRESHOLD), "10000000000000000000 Yocto");
+    }
+
+    // `None` allowance is NEAR's "unlimited", the most permissive value — not zero. It must not
+    // render the same "0 Yocto" as a genuinely zero-allowance key.
+    #[test]
+    fn an_unlimited_allowance_is_not_shown_as_zero() {
+        assert_eq!(format_allowance(&None), "Unlimited");
+        assert_eq!(format_allowance(&Some(0)), "0 Yocto");
+        assert_ne!(format_allowance(&None), format_allowance(&Some(0)));
     }
 }

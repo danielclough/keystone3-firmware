@@ -9,9 +9,11 @@ use crate::parser::overview::{NearTxOverview, NearTxOverviewGeneral, NearTxOverv
 use crate::parser::structs::{NearTxDisplayType, ParsedNearTx};
 use crate::parser::transaction::{Action, Normalizer, Transaction};
 use crate::parser::utils::args_display;
+use crate::parser::utils::format_allowance;
 use crate::parser::utils::format_amount;
 use crate::parser::utils::sanitize_display;
 use crate::parser::utils::Merge;
+use crate::primitives_core::account::AccessKeyPermission;
 use alloc::format;
 use alloc::string::{String, ToString};
 
@@ -103,12 +105,52 @@ impl ParsedNearTx {
                 // through sanitize_display: control characters (a newline especially, which could
                 // forge extra "Method:"/"Args:" lines in this multi-line label) become spaces.
                 // args_display already sanitises, so only the method needs it here.
-                Action::FunctionCall(fc) => format!(
-                    "{}\nMethod: {}\nArgs: {}",
-                    fc.normalize(),
-                    sanitize_display(&fc.method_name),
-                    args_display(&fc.args),
-                ),
+                Action::FunctionCall(fc) => {
+                    let mut entry =
+                        format!("{}\nMethod: {}", fc.normalize(), sanitize_display(&fc.method_name));
+                    // A call with no args (deposit_and_stake, unstake_all, withdraw_all) gets no
+                    // `Args:` line at all — matching the `skip_serializing_if` on the Details side —
+                    // rather than a trailing `Args: ` that reads as an empty argument.
+                    if !fc.args.is_empty() {
+                        entry.push_str("\nArgs: ");
+                        entry.push_str(&args_display(&fc.args));
+                    }
+                    entry
+                }
+                // AddKey's operator-relevant content is *what the granted key can do*: a full-access
+                // key is total account control, a function-call key is scoped to one contract and a
+                // set of methods. The bare "Add Key" label hides all of it, so a full-access grant
+                // and a pool-scoped staking key rendered a byte-identical Overview — the
+                // addkey-permission collision (keystone-guide-kit/security_lab/
+                // S-P2-CONFIRM-DIFFERENTIAL.md). Surface the granted key and its permission here, on
+                // the screen the operator reads first, the same way FunctionCall surfaces method/
+                // args above. `receiver_id` and the method names are attacker-controlled freeform
+                // (`receiver_id` is a String, not an AccountId — testnet genesis holds invalid ones)
+                // so both run through sanitize_display, exactly like the method/args above.
+                Action::AddKey(ak) => {
+                    let mut entry = format!("Add Key\nPublic Key: {}", ak.public_key);
+                    match &ak.access_key.permission {
+                        AccessKeyPermission::FullAccess => entry.push_str("\nAccess: Full Access"),
+                        AccessKeyPermission::FunctionCall(fc) => {
+                            entry.push_str("\nAccess: Function Call");
+                            entry.push_str("\nContract: ");
+                            entry.push_str(&sanitize_display(&fc.receiver_id));
+                            entry.push_str("\nMethods: ");
+                            if fc.method_names.is_empty() {
+                                // An empty method set authorises *any* method on the contract — the
+                                // broadest function-call grant — so say so, not leave a blank line.
+                                entry.push_str("any");
+                            } else {
+                                let methods: Vec<String> =
+                                    fc.method_names.iter().map(|m| sanitize_display(m)).collect();
+                                entry.push_str(&methods.join(", "));
+                            }
+                            entry.push_str("\nAllowance: ");
+                            entry.push_str(&format_allowance(&fc.allowance));
+                        }
+                    }
+                    entry
+                }
                 other => other.normalize(),
             })
             .collect();
@@ -300,7 +342,11 @@ mod tests {
                 );
                 assert_eq!("Transfer", overview.action_list[3]);
                 assert_eq!("Stake", overview.action_list[4]);
-                assert_eq!("Add Key", overview.action_list[5]);
+                assert_eq!(
+                    "Add Key\nPublic Key: ed25519:4LGE55cdv7DRfErMovJY3Hm6jQrzRFyGfGpAW9vnb8Sz\n\
+                     Access: Function Call\nContract: zzz\nMethods: www\nAllowance: Unlimited",
+                    overview.action_list[5]
+                );
                 assert_eq!("Delete Key", overview.action_list[6]);
                 assert_eq!("Delete Account", overview.action_list[7]);
             }
@@ -340,7 +386,7 @@ mod tests {
                 "Public Key": "ed25519:4LGE55cdv7DRfErMovJY3Hm6jQrzRFyGfGpAW9vnb8Sz",
                 "Access Key Permission": "FunctionCall",
                 "Access Key Receiver ID": "zzz",
-                "Access Key Allowance": "0 Yocto",
+                "Access Key Allowance": "Unlimited",
                 "Access Key Nonce": 0,
                 "Access Key Method Names": ["www"]
             },
@@ -368,7 +414,11 @@ mod tests {
                 assert_eq!("test.near".to_string(), overview.from);
                 assert_eq!("whatever.near".to_string(), overview.to);
                 assert_eq!(1, overview.action_list.len());
-                assert_eq!("Add Key", overview.action_list[0]);
+                assert_eq!(
+                    "Add Key\nPublic Key: ed25519:4LGE55cdv7DRfErMovJY3Hm6jQrzRFyGfGpAW9vnb8Sz\n\
+                     Access: Full Access",
+                    overview.action_list[0]
+                );
             }
             _ => panic!("error overview type"),
         };
@@ -438,6 +488,95 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_args_call_shows_no_args_line_on_either_screen() {
+        // deposit_and_stake / unstake_all / withdraw_all carry no args. The confirm screen must
+        // not invent an empty `Args:` line for them — that reads as "an empty argument" rather
+        // than "this call takes none". Build the borsh transaction directly and parse it.
+        use crate::parser::transaction::{Action, FunctionCallAction, Transaction};
+        use borsh::BorshSerialize;
+
+        let tx = Transaction {
+            signer_id: "test.near".parse().unwrap(),
+            public_key: "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV"
+                .parse()
+                .unwrap(),
+            nonce: 1,
+            receiver_id: "pool.near".parse().unwrap(),
+            block_hash: Default::default(),
+            actions: alloc::vec![Action::FunctionCall(FunctionCallAction {
+                method_name: "deposit_and_stake".to_string(),
+                args: alloc::vec![],
+                gas: 30_000_000_000_000,
+                deposit: 0,
+            })],
+        };
+        let bytes = BorshSerialize::try_to_vec(&tx).unwrap();
+        let parsed = parse(&bytes).unwrap();
+        match parsed.overview {
+            NearTxOverview::General(overview) => {
+                assert_eq!(1, overview.action_list.len());
+                assert_eq!(
+                    "Function Call\nMethod: deposit_and_stake",
+                    overview.action_list[0]
+                );
+                assert!(!overview.action_list[0].contains("Args"));
+            }
+            _ => panic!("error overview type"),
+        };
+        let parsed_detail: Value = serde_json::from_str(parsed.detail.as_str()).unwrap();
+        // The Details entry for the call carries Method but no Args key at all.
+        let call = &parsed_detail.as_array().unwrap()[1];
+        assert_eq!(call["Method"], "deposit_and_stake");
+        assert!(call.get("Args").is_none(), "{parsed_detail}");
+    }
+
+    #[test]
+    fn a_full_access_grant_and_a_function_call_grant_render_different_overviews() {
+        // The addkey-permission confirm-screen collision: same account, same granted key, but one
+        // grants total account control and the other a pool-scoped staking key. The Overview — the
+        // screen the operator reads first, and the one the differential fingerprints — must render
+        // the difference, not the bare "Add Key" that hid it (S-P2-CONFIRM-DIFFERENTIAL).
+        use crate::parser::transaction::{Action, AddKeyAction, Transaction};
+        use crate::primitives_core::account::{
+            AccessKey, AccessKeyPermission, FunctionCallPermission,
+        };
+        use borsh::BorshSerialize;
+
+        let granted: crate::crypto::PublicKey = "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV"
+            .parse()
+            .unwrap();
+        let overview = |permission: AccessKeyPermission| {
+            let tx = Transaction {
+                signer_id: "alice.near".parse().unwrap(),
+                public_key: "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV".parse().unwrap(),
+                nonce: 1,
+                receiver_id: "alice.near".parse().unwrap(),
+                block_hash: Default::default(),
+                actions: alloc::vec![Action::AddKey(AddKeyAction {
+                    public_key: granted.clone(),
+                    access_key: AccessKey { nonce: 0, permission },
+                })],
+            };
+            let bytes = BorshSerialize::try_to_vec(&tx).unwrap();
+            match parse(&bytes).unwrap().overview {
+                NearTxOverview::General(o) => o.action_list[0].clone(),
+                _ => panic!("expected a general overview"),
+            }
+        };
+        let full = overview(AccessKeyPermission::FullAccess);
+        let restricted = overview(AccessKeyPermission::FunctionCall(FunctionCallPermission {
+            allowance: Some(250_000_000_000_000_000_000_000_000),
+            receiver_id: "pool.near".to_string(),
+            method_names: alloc::vec!["deposit_and_stake".to_string()],
+        }));
+        assert!(full.contains("Full Access"), "{full}");
+        assert!(restricted.contains("Function Call"), "{restricted}");
+        assert!(restricted.contains("pool.near"), "{restricted}");
+        // The whole point: the operator can tell them apart on the first screen.
+        assert_ne!(full, restricted);
+    }
+
+    #[test]
     fn test_parse_transaction_9() {
         // Add Key
         let cbor_str = "a301d82550d63b2bcc149d41e485f429b05ce2a4f1028159012b40000000333138323466626632343335666231656361346466633339373734313833636232356631336231303335326435643533323736313662353963333565616539660031824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f452d16f48e3f00004000000033313832346662663234333566623165636134646663333937373431383363623235663133623130333532643564353332373631366235396333356561653966985676ff103ae696d5654434d300a4818edf38c4fcb6228a62557763849111bc010000000500bc37e7c948e4e127d55070003805c7834f70ef44f454af4e7be0bfde558a57a5000000000000000000002200000061737365742d6d616e616765722e6f726465726c792d6e6574776f726b2e6e6561720000000003d90130a20186182cf519018df500f5021a707eed6c";
@@ -455,14 +594,19 @@ mod tests {
                     overview.to
                 );
                 assert_eq!(1, overview.action_list.len());
-                assert_eq!("Add Key", overview.action_list[0]);
+                assert_eq!(
+                    "Add Key\nPublic Key: ed25519:Dfj6EUNikNmNVxKCRxdq9GDVpEJJNaU3pEzmNVZZ6uTi\n\
+                     Access: Function Call\nContract: asset-manager.orderly-network.near\n\
+                     Methods: any\nAllowance: Unlimited",
+                    overview.action_list[0]
+                );
             }
             _ => panic!("error overview type"),
         };
         let parsed_detail: Value = serde_json::from_str(parsed.detail.as_str()).unwrap();
         let expected_detail = json!( [
             {"From":"31824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f","To":"31824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f"},
-            {"Access Key Allowance":"0 Yocto", "Access Key Permission": "FunctionCall","Access Key Method Names":[],"Access Key Nonce": 0,"Access Key Receiver ID":"asset-manager.orderly-network.near","Action":"Add Key","Public Key":"ed25519:Dfj6EUNikNmNVxKCRxdq9GDVpEJJNaU3pEzmNVZZ6uTi"}]);
+            {"Access Key Allowance":"Unlimited", "Access Key Permission": "FunctionCall","Access Key Method Names":[],"Access Key Nonce": 0,"Access Key Receiver ID":"asset-manager.orderly-network.near","Action":"Add Key","Public Key":"ed25519:Dfj6EUNikNmNVxKCRxdq9GDVpEJJNaU3pEzmNVZZ6uTi"}]);
         assert_eq!(expected_detail, parsed_detail);
     }
 }

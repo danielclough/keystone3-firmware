@@ -108,7 +108,18 @@ static void GuiShowNearTxTransferOverview(lv_obj_t *parent, PtrT_DisplayNearTxOv
     lv_label_set_text(label, overviewData->transfer_value);
     lv_obj_set_style_text_font(label, &openSansEnLittleTitle, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, lv_color_hex(0xF5870A), LV_PART_MAIN);
+    // A full-precision NEAR amount can run to 30+ characters (format_near_units renders every yocto
+    // digit). Wrap it and grow the container to fit — exactly as the From/To labels below do —
+    // instead of leaving it a single unwrapped line that overflows the fixed 408px box and clips the
+    // low-order digits at the right edge. That clip made two transfers differing only in a clipped
+    // digit render a byte-identical Overview: the amount-dust confirm-differential collision
+    // (keystone-guide-kit/security_lab/S-P2-CONFIRM-DIFFERENTIAL.md). The device signs the exact
+    // u128, so the confirm screen must show every digit of it.
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, 360);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 24, 50);
+    lv_obj_update_layout(label);
+    lv_obj_set_height(valueContainer, lv_obj_get_y2(label) + 16);
 
     lv_obj_t *mainActionContainer = GuiCreateContainerWithParent(parent, 408, 62);
     lv_obj_align_to(mainActionContainer, valueContainer, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
