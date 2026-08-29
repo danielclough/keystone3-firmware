@@ -17,6 +17,17 @@ pub unsafe fn recover_c_char(s: *mut c_char) -> String {
     CStr::from_ptr(s).to_str().unwrap().to_string()
 }
 
+// Fallible sibling of `recover_c_char`: returns the recovered string when the C string is valid
+// UTF-8, and the `Utf8Error` when it is not, instead of panicking. Any `extern "C"` entry point
+// that recovers externally supplied bytes (the decoded contents of a scanned QR, or a USB
+// transfer) MUST use this and turn the error into a refused-input response, never the panicking
+// `recover_c_char`: a panic inside an `extern "C"` fn cannot unwind and aborts the whole firmware.
+// A QR in byte mode encodes arbitrary octets, so a crafted code can place a non-UTF-8 byte inside
+// an otherwise well-formed `ur:` string, making this edge reachable at the very first parse step.
+pub unsafe fn recover_c_char_checked(s: *mut c_char) -> Result<String, core::str::Utf8Error> {
+    CStr::from_ptr(s).to_str().map(ToString::to_string)
+}
+
 pub unsafe fn check_recover_c_char_lossy(s: *mut c_char) -> (bool, String) {
     match CStr::from_ptr(s).to_str() {
         Ok(value) => (true, value.to_string()),

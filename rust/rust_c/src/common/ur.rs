@@ -80,7 +80,7 @@ use super::errors::{ErrorCodes, RustCError};
 use super::free::Free;
 use super::types::{PtrDecoder, PtrEncoder, PtrString, PtrUR};
 use super::ur_ext::InferViewType;
-use super::utils::{convert_c_char, recover_c_char};
+use super::utils::{convert_c_char, recover_c_char, recover_c_char_checked};
 use crate::{
     extract_ptr_with_type, free_ptr_with_type, free_str_ptr, impl_c_ptr, impl_new_error,
     impl_response,
@@ -779,6 +779,26 @@ mod tests {
             zcash_batch_sig_result.free();
         }
     }
+
+    // A QR in byte mode can carry a `ur:` string with a single non-UTF-8 byte (arbitrary octets).
+    // `parse_ur` must refuse it with a decode error, never abort: the old `recover_c_char(ur)
+    // .unwrap()` panicked, and a panic across this `extern "C"` boundary is a non-unwinding abort —
+    // a denial of service from one scanned frame.
+    #[test]
+    fn parse_ur_refuses_non_utf8_input_instead_of_aborting() {
+        // Well-formed `ur:` prefix, then a lone 0xc6 byte in the payload.
+        let bytes: &[u8] = b"ur:bytes/1-1/abc\xc6def";
+        let raw = CString::new(bytes).unwrap().into_raw();
+        let result = unsafe { parse_ur(raw) };
+        let error_code = unsafe { (*result).error_code };
+        assert_ne!(error_code, ErrorCodes::Success as u32);
+        assert_eq!(error_code, ErrorCodes::URDecodeError as u32);
+        unsafe {
+            (*result).free();
+            let _ = Box::from_raw(result);
+            let _ = CString::from_raw(raw);
+        }
+    }
 }
 
 fn get_ur_type(ur: &String) -> Result<QRCodeType, URError> {
@@ -1036,13 +1056,31 @@ pub extern "C" fn get_next_cyclic_part(ptr: PtrEncoder) -> *mut UREncodeMultiRes
     }
 }
 
+// A QR in byte mode carries arbitrary octets, so the decoded string handed to `parse_ur` may not
+// be valid UTF-8. `recover_c_char` would `.unwrap()` the conversion and panic; because this fn is
+// `extern "C"` that panic cannot unwind and aborts the firmware — a denial of service from a single
+// crafted frame. Recover fallibly and refuse the frame as a decode error (error_code != 0, the
+// "invalid QR" case the UI already handles) instead of aborting.
 #[no_mangle]
 pub unsafe extern "C" fn parse_ur(ur: PtrString) -> *mut URParseResult {
-    decode_ur(recover_c_char(ur)).c_ptr()
+    match recover_c_char_checked(ur) {
+        Ok(ur) => decode_ur(ur).c_ptr(),
+        Err(e) => {
+            URParseResult::from(URError::UrDecodeError(format!("invalid utf-8 in ur: {e}"))).c_ptr()
+        }
+    }
 }
 
+// Same non-UTF-8 abort hazard as `parse_ur`: `receive` is the multi-part scan entry point, so it
+// recovers attacker-reachable bytes too and must refuse rather than panic across the FFI edge.
 #[no_mangle]
 pub unsafe extern "C" fn receive(ur: PtrString, decoder: PtrDecoder) -> *mut URParseMultiResult {
-    let decoder = extract_ptr_with_type!(decoder, KeystoneURDecoder);
-    receive_ur(recover_c_char(ur), decoder).c_ptr()
+    match recover_c_char_checked(ur) {
+        Ok(ur) => {
+            let decoder = extract_ptr_with_type!(decoder, KeystoneURDecoder);
+            receive_ur(ur, decoder).c_ptr()
+        }
+        Err(e) => URParseMultiResult::from(URError::UrDecodeError(format!("invalid utf-8 in ur: {e}")))
+            .c_ptr(),
+    }
 }
