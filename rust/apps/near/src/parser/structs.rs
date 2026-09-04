@@ -15,6 +15,10 @@ pub struct ParsedNearTx {
 pub enum NearTxDisplayType {
     Transfer,
     General,
+    /// A NEP-413 off-chain message, not a transaction. A third display type rather than a second
+    /// view: the page is the same Overview/Details tabview, but what the holder must check is
+    /// entirely different — text, recipient and callback url, none of which a transaction has.
+    Message,
 }
 
 impl ToString for NearTxDisplayType {
@@ -22,6 +26,7 @@ impl ToString for NearTxDisplayType {
         match &self {
             NearTxDisplayType::Transfer => "Transfer".to_string(),
             NearTxDisplayType::General => "General".to_string(),
+            NearTxDisplayType::Message => "Message".to_string(),
         }
     }
 }

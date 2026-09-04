@@ -209,6 +209,32 @@ pub fn read_capped_len(
     Ok(len)
 }
 
+/// [`read_capped_len`] for a borsh `String`: the same cap, applied to the byte length, then the
+/// UTF-8 check. Stock `String::deserialize` allocates on the claimed length before it reads a
+/// single byte, so a NEP-413 message field would otherwise be an allocator-exhaustion primitive
+/// reachable from one scanned QR frame.
+pub fn read_capped_string(
+    buf: &mut &[u8],
+    max: u32,
+    what: &str,
+) -> core::result::Result<String, borsh::maybestd::io::Error> {
+    use borsh::maybestd::io::{Error, ErrorKind};
+    let len = read_capped_len(buf, max, what)? as usize;
+    if buf.len() < len {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "{what} claims {len} bytes but only {} remain",
+                buf.len()
+            ),
+        ));
+    }
+    let (text, rest) = buf.split_at(len);
+    *buf = rest;
+    String::from_utf8(text.to_vec())
+        .map_err(|_| Error::new(ErrorKind::InvalidData, format!("{what} is not valid UTF-8")))
+}
+
 #[cfg(test)]
 mod serde_json_value_updater_test {
     use super::*;

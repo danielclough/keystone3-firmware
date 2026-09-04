@@ -32,7 +32,7 @@ impl Free for DisplayNearTxOverviewGeneralAction {
 
 #[repr(C)]
 pub struct DisplayNearTxOverview {
-    // `Transfer`, `General`
+    // `Transfer`, `General`, `Message`
     pub display_type: PtrString,
     // 'Transfer',
     pub main_action: PtrString,
@@ -44,6 +44,11 @@ pub struct DisplayNearTxOverview {
     pub from: PtrString,
     pub to: PtrString,
     pub action_list: PtrT<VecFFI<DisplayNearTxOverviewGeneralAction>>,
+    // message (NEP-413). `callback_url` is null when the payload carries none — an absent
+    // callback and an empty one are different things, and the screen says so.
+    pub message: PtrString,
+    pub recipient: PtrString,
+    pub callback_url: PtrString,
 }
 
 impl_c_ptrs!(DisplayNearTx, DisplayNearTxOverview);
@@ -59,6 +64,9 @@ impl Default for DisplayNearTxOverview {
             from: null_mut(),
             to: null_mut(),
             action_list: null_mut(),
+            message: null_mut(),
+            recipient: null_mut(),
+            callback_url: null_mut(),
         }
     }
 }
@@ -80,6 +88,9 @@ impl Free for DisplayNearTxOverview {
         free_str_ptr!(self.transfer_to);
         free_str_ptr!(self.from);
         free_str_ptr!(self.to);
+        free_str_ptr!(self.message);
+        free_str_ptr!(self.recipient);
+        free_str_ptr!(self.callback_url);
         if !self.action_list.is_null() {
             let x = Box::from_raw(self.action_list);
             let ve = Vec::from_raw_parts(x.data, x.size, x.cap);
@@ -113,6 +124,23 @@ impl From<&ParsedNearTx> for DisplayNearTxOverview {
                         main_action: convert_c_char(overview.main_action.to_string()),
                         transfer_from: convert_c_char(overview.from.to_string()),
                         transfer_to: convert_c_char(overview.to.to_string()),
+                        ..DisplayNearTxOverview::default()
+                    };
+                }
+            }
+            NearTxDisplayType::Message => {
+                if let NearTxOverview::Message(overview) = &value.overview {
+                    return Self {
+                        display_type,
+                        message: convert_c_char(overview.message.to_string()),
+                        recipient: convert_c_char(overview.recipient.to_string()),
+                        // Left null when absent, so the screen can say "none" rather than render
+                        // a blank line that reads as an empty url.
+                        callback_url: overview
+                            .callback_url
+                            .as_ref()
+                            .map(|u| convert_c_char(u.to_string()))
+                            .unwrap_or(null_mut()),
                         ..DisplayNearTxOverview::default()
                     };
                 }

@@ -267,6 +267,11 @@ pub enum ViewType {
     CardanoSignTxHash,
     #[cfg(feature = "near")]
     NearTx,
+    /// A NEP-413 off-chain message. Same UR type as `NearTx` — the payload's own tag is what tells
+    /// them apart (`app_near::classify_payload`) — but a separate view type so `IsMessageType`
+    /// titles the confirm and result screens "message", not "transaction".
+    #[cfg(feature = "near")]
+    NearMessage,
     #[cfg(feature = "xrp")]
     XRPTx,
     #[cfg(feature = "cosmos")]

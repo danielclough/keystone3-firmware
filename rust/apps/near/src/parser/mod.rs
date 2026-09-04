@@ -5,7 +5,9 @@ mod transaction;
 pub mod utils;
 
 use crate::errors::{NearError, Result};
-use crate::parser::overview::{NearTxOverview, NearTxOverviewGeneral, NearTxOverviewTransfer};
+use crate::parser::overview::{
+    NearTxOverview, NearTxOverviewGeneral, NearTxOverviewMessage, NearTxOverviewTransfer,
+};
 use crate::parser::structs::{NearTxDisplayType, ParsedNearTx};
 use crate::parser::transaction::{Action, Normalizer, Transaction};
 use crate::parser::utils::args_display;
@@ -24,6 +26,12 @@ use serde_json::{json, Value};
 
 impl ParsedNearTx {
     pub fn build(data: &Vec<u8>) -> Result<Self> {
+        // Classified by the payload's own tag before anything is decoded, never by which decode
+        // happens to succeed: a tagged payload that fails to parse is a broken *message* and must
+        // be refused as one rather than retried as a transaction and shown on the wrong screen.
+        if crate::classify_payload(data) == crate::NearPayloadType::Nep413Message {
+            return Self::build_message(data);
+        }
         let tx = Transaction::try_from_slice(data).map_err(|err| {
             NearError::ParseTxError(format!("borsh deserialize failed {:?}", err.to_string()))
         })?;
@@ -41,6 +49,40 @@ impl ParsedNearTx {
             // testnet transaction this project has ever signed was previously displayed as
             // Mainnet (near-shopify/plan/01-near-actions.md, Deliverable 6.3), which is worse
             // than saying nothing: stop claiming a specific network rather than guess one.
+            network: "NEAR".to_string(),
+        })
+    }
+
+    /// The NEP-413 half of [`build`](Self::build). Every string here is requester-controlled
+    /// freeform text — far more so than a transaction's, which is at least AccountId-validated —
+    /// so all of it goes through `sanitize_display`: a newline in a message would otherwise be
+    /// able to forge a second "Recipient:" line on the confirm screen.
+    fn build_message(data: &Vec<u8>) -> Result<Self> {
+        let payload = crate::nep413::Nep413Payload::parse(data)?;
+        let message = sanitize_display(&payload.message);
+        let recipient = sanitize_display(&payload.recipient);
+        let callback_url = payload.callback_url.as_deref().map(sanitize_display);
+
+        let mut detail = json!({
+            "Message": message,
+            "Recipient": recipient,
+            // Hex, not raw: a nonce is 32 arbitrary bytes, not text.
+            "Nonce": hex::encode(payload.nonce),
+        });
+        if let Some(url) = &callback_url {
+            detail["Callback URL"] = Value::String(url.clone());
+        }
+
+        Ok(Self {
+            display_type: NearTxDisplayType::Message,
+            overview: NearTxOverview::Message(NearTxOverviewMessage {
+                message,
+                recipient,
+                callback_url,
+            }),
+            // The Details tab renders an array of objects (one per section, as a transaction's
+            // From/To plus one per action); a message is a single section.
+            detail: serde_json::to_string(&json!([detail]))?,
             network: "NEAR".to_string(),
         })
     }
@@ -73,6 +115,12 @@ impl ParsedNearTx {
         match display_type {
             NearTxDisplayType::Transfer => Self::build_transfer_overview(tx),
             NearTxDisplayType::General => Self::build_general_overview(tx),
+            // Unreachable: a message never becomes a `Transaction`, so `build` routes it to
+            // `build_message` before this is called. Refused rather than rendered as a transaction
+            // if that ever stops being true.
+            NearTxDisplayType::Message => Err(NearError::ParseTxError(
+                "a NEP-413 message has no transaction overview".to_string(),
+            )),
         }
     }
 
@@ -167,6 +215,7 @@ mod tests {
     use crate::parse;
     use crate::parser::overview::NearTxOverview;
     use alloc::string::ToString;
+    use alloc::vec::Vec;
     use serde_json::{json, Value};
     use ur_registry::near::near_sign_request::NearSignRequest;
     use {hex, serde_json};
@@ -608,5 +657,110 @@ mod tests {
             {"From":"31824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f","To":"31824fbf2435fb1eca4dfc39774183cb25f13b10352d5d5327616b59c35eae9f"},
             {"Access Key Allowance":"Unlimited", "Access Key Permission": "FunctionCall","Access Key Method Names":[],"Access Key Nonce": 0,"Access Key Receiver ID":"asset-manager.orderly-network.near","Action":"Add Key","Public Key":"ed25519:Dfj6EUNikNmNVxKCRxdq9GDVpEJJNaU3pEzmNVZZ6uTi"}]);
         assert_eq!(expected_detail, parsed_detail);
+    }
+
+    /// The bytes a NEP-413 requester puts in `sign_data`, built by hand — this is the wire format,
+    /// so the tests must not reuse the parser's own idea of it.
+    fn message_bytes(message: &str, recipient: &str, callback_url: Option<&str>) -> Vec<u8> {
+        let mut out = crate::nep413::TAG.to_le_bytes().to_vec();
+        out.extend((message.len() as u32).to_le_bytes());
+        out.extend(message.as_bytes());
+        out.extend([0x7b; 32]);
+        out.extend((recipient.len() as u32).to_le_bytes());
+        out.extend(recipient.as_bytes());
+        match callback_url {
+            None => out.push(0),
+            Some(url) => {
+                out.push(1);
+                out.extend((url.len() as u32).to_le_bytes());
+                out.extend(url.as_bytes());
+            }
+        }
+        out
+    }
+
+    const TEST_NONCE_HEX: &str =
+        "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b";
+
+    #[test]
+    fn a_nep413_message_is_shown_as_a_message_and_never_as_a_transaction() {
+        let parsed = parse(&message_bytes(
+            "app.example wants you to sign in",
+            "app.example",
+            Some("https://app.example/cb"),
+        ))
+        .unwrap();
+
+        assert_eq!("Message", parsed.display_type.to_string());
+        match parsed.overview {
+            NearTxOverview::Message(overview) => {
+                assert_eq!("app.example wants you to sign in", overview.message);
+                assert_eq!("app.example", overview.recipient);
+                assert_eq!(
+                    Some("https://app.example/cb".to_string()),
+                    overview.callback_url
+                );
+            }
+            _ => panic!("a NEP-413 payload must not render as a transaction overview"),
+        }
+
+        let parsed_detail: Value = serde_json::from_str(parsed.detail.as_str()).unwrap();
+        assert_eq!(
+            json!([{
+                "Message": "app.example wants you to sign in",
+                "Recipient": "app.example",
+                "Nonce": TEST_NONCE_HEX,
+                "Callback URL": "https://app.example/cb",
+            }]),
+            parsed_detail
+        );
+    }
+
+    #[test]
+    fn a_message_without_a_callback_url_has_no_callback_url_line() {
+        let parsed = parse(&message_bytes("hello", "app.example", None)).unwrap();
+        match parsed.overview {
+            NearTxOverview::Message(overview) => assert_eq!(None, overview.callback_url),
+            _ => panic!("a NEP-413 payload must not render as a transaction overview"),
+        }
+        let parsed_detail: Value = serde_json::from_str(parsed.detail.as_str()).unwrap();
+        assert_eq!(
+            json!([{
+                "Message": "hello",
+                "Recipient": "app.example",
+                "Nonce": TEST_NONCE_HEX,
+            }]),
+            parsed_detail
+        );
+    }
+
+    /// Every message field is requester-controlled freeform text, so a newline in one must not be
+    /// able to forge a second field on the confirm screen — the rule a function call's method and
+    /// args already follow, applied to the fields a message adds.
+    #[test]
+    fn a_messages_control_characters_cannot_forge_a_second_field() {
+        let parsed = parse(&message_bytes(
+            "harmless\nRecipient: bank.near",
+            "evil\u{7f}.example",
+            None,
+        ))
+        .unwrap();
+        match parsed.overview {
+            NearTxOverview::Message(overview) => {
+                assert_eq!("harmless Recipient: bank.near", overview.message);
+                assert_eq!("evil .example", overview.recipient);
+            }
+            _ => panic!("a NEP-413 payload must not render as a transaction overview"),
+        }
+    }
+
+    /// A payload that claims to be a message and then fails to parse must be refused as a broken
+    /// message — never retried as a transaction, which would show the holder the wrong screen for
+    /// bytes the device is about to sign.
+    #[test]
+    fn a_malformed_message_is_refused_rather_than_parsed_as_a_transaction() {
+        let mut truncated = message_bytes("hello", "app.example", None);
+        truncated.truncate(truncated.len() - 3);
+        assert!(parse(&truncated).is_err());
     }
 }

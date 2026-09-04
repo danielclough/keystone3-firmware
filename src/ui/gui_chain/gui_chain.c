@@ -90,6 +90,11 @@ static const ViewHandlerEntry g_viewHandlerMap[] = {
     {SolanaMessage, GuiGetSolSignQrCodeData, GuiGetSolSignQrCodeData, GuiGetSolCheckResult, CHAIN_SOL, REMAPVIEW_SOL_MESSAGE},
 
     {NearTx, GuiGetNearSignQrCodeData, GuiGetNearSignQrCodeData, GuiGetNearCheckResult, CHAIN_NEAR, REMAPVIEW_NEAR},
+    // A NEP-413 message signs and checks exactly like a transaction (same UR type, same key path,
+    // same signature response) and is reviewed on the same page — REMAPVIEW_NEAR, whose Overview
+    // and Details renderers branch on the parsed display type. It is a separate view type only so
+    // IsMessageType() can title the screens correctly.
+    {NearMessage, GuiGetNearSignQrCodeData, GuiGetNearSignQrCodeData, GuiGetNearCheckResult, CHAIN_NEAR, REMAPVIEW_NEAR},
 
     {AptosTx, GuiGetAptosSignQrCodeData, NULL, GuiGetAptosCheckResult, CHAIN_APT, REMAPVIEW_APT},
 
@@ -150,7 +155,7 @@ GuiChainCoinType ViewTypeToChainTypeSwitch(uint8_t viewType)
 #ifdef WEB3_VERSION
 bool IsMessageType(uint8_t type)
 {
-    return type == EthPersonalMessage || type == EthTypedData || type == TronPersonalMessage || IsCosmosMsg(type) || type == SolanaMessage || IsAptosMsg(type) || type == BtcMsg || type == ArweaveMessage || type == CardanoSignData || type == CardanoSignCip8Data;
+    return type == EthPersonalMessage || type == EthTypedData || type == TronPersonalMessage || IsCosmosMsg(type) || type == SolanaMessage || type == NearMessage || IsAptosMsg(type) || type == BtcMsg || type == ArweaveMessage || type == CardanoSignData || type == CardanoSignCip8Data;
 }
 
 bool isCatalystVotingRegistration(uint8_t type)

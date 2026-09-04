@@ -234,6 +234,66 @@ static void GuiShowNearTxGeneralOverview(lv_obj_t *parent, PtrT_DisplayNearTxOve
     lv_obj_set_height(container, lv_obj_get_y2(prev) + 16);
 }
 
+// A NEP-413 off-chain message (nep413.rs), not a transaction: what the holder has to check is the
+// text they are authorising, who it is addressed to, and where an approval can be sent. Every one
+// of those is requester-controlled freeform text — sanitised on the Rust side, wrapped here — so
+// each gets a wrapped label sized to the container rather than a single clipped line, for the same
+// reason the transfer amount above does: a value the screen cuts off is a value the holder did not
+// actually approve.
+static void GuiShowNearMessageOverview(lv_obj_t *parent, PtrT_DisplayNearTxOverview overviewData)
+{
+    lv_obj_t *container = GuiCreateContainerWithParent(parent, 408, 150);
+    lv_obj_align(container, LV_ALIGN_DEFAULT, 0, 0);
+    SetContainerDefaultStyle(container);
+
+    lv_obj_t *label = lv_label_create(container);
+    lv_label_set_text(label, "Message");
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 24, 16);
+    SetTitleLabelStyle(label);
+    lv_obj_t *prev = label;
+
+    label = lv_label_create(container);
+    lv_label_set_text(label, overviewData->message);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, 360);
+    lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+    SetContentLableStyle(label);
+    prev = label;
+
+    label = lv_label_create(container);
+    lv_label_set_text(label, "Recipient");
+    lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 16);
+    SetTitleLabelStyle(label);
+    prev = label;
+
+    label = lv_label_create(container);
+    lv_label_set_text(label, overviewData->recipient);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, 360);
+    lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+    SetContentLableStyle(label);
+    prev = label;
+
+    label = lv_label_create(container);
+    lv_label_set_text(label, "Callback URL");
+    lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 16);
+    SetTitleLabelStyle(label);
+    prev = label;
+
+    label = lv_label_create(container);
+    // A message with no callback url says so. Rendering a null pointer as an empty line would let
+    // an absent callback and an empty one look identical.
+    lv_label_set_text(label, overviewData->callback_url != NULL ? overviewData->callback_url : "None");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, 360);
+    lv_obj_align_to(label, prev, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+    SetContentLableStyle(label);
+    prev = label;
+
+    lv_obj_update_layout(prev);
+    lv_obj_set_height(container, lv_obj_get_y2(prev) + 16);
+}
+
 void GuiShowNearTxOverview(lv_obj_t *parent, void *totalData)
 {
     lv_obj_set_size(parent, 408, 444);
@@ -247,6 +307,8 @@ void GuiShowNearTxOverview(lv_obj_t *parent, void *totalData)
         GuiShowNearTxTransferOverview(parent, overviewData);
     } else if (0 == strcmp(overviewData->display_type, "General")) {
         GuiShowNearTxGeneralOverview(parent, overviewData);
+    } else if (0 == strcmp(overviewData->display_type, "Message")) {
+        GuiShowNearMessageOverview(parent, overviewData);
     }
 }
 

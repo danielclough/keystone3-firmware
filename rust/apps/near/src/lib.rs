@@ -17,9 +17,34 @@ use cryptoxide::hashing::sha256;
 mod account_id;
 mod crypto;
 pub mod errors;
+pub mod nep413;
 pub mod parser;
 mod primitives_core;
 
+/// Which of the two payload families a `near-sign-request`'s `sign_data` holds. The UR carries no
+/// type field and needs none — a NEP-413 message is tagged with a prefix no transaction encoding
+/// can begin with (see [`nep413::TAG`]) — so the bytes classify themselves.
+///
+/// Mirrors `app_solana::classify_payload`: the display type is decided by *what the payload is*,
+/// never by an external claim the requester makes about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NearPayloadType {
+    Transaction,
+    Nep413Message,
+}
+
+pub fn classify_payload(data: &[u8]) -> NearPayloadType {
+    if nep413::Nep413Payload::is_signing_payload(data) {
+        NearPayloadType::Nep413Message
+    } else {
+        NearPayloadType::Transaction
+    }
+}
+
+/// Signs the SHA-256 digest of whatever `sign_data` held. Unchanged by NEP-413 support on purpose:
+/// both a transaction (`sha256(borsh(tx))`) and a message (`sha256(tag ++ borsh(payload))`) are
+/// signed as the digest of their own bytes, so the difference lives entirely in parsing and
+/// display — the two places a human's decision depends on — and not in the signing path.
 pub fn sign(message: &Vec<u8>, hd_path: &String, seed: &[u8]) -> Result<[u8; 64]> {
     let message = sha256(message);
     keystore::algorithms::ed25519::slip10_ed25519::sign_message_by_seed(seed, hd_path, &message)

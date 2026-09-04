@@ -389,7 +389,16 @@ impl InferViewType for SolSignRequest {
 #[cfg(feature = "near")]
 impl InferViewType for NearSignRequest {
     fn infer(&self) -> Result<ViewType, URError> {
-        Ok(ViewType::NearTx)
+        // Classified from the payload itself, like Solana's above: a NEP-413 message carries a tag
+        // no transaction encoding can begin with, and the UR has no type field to trust instead.
+        // An empty `sign_data` falls through as a transaction so the existing "no sign data" parse
+        // error is what the holder sees, rather than a message screen with nothing on it.
+        match self.get_sign_data().first() {
+            Some(data) if app_near::classify_payload(data) == app_near::NearPayloadType::Nep413Message => {
+                Ok(ViewType::NearMessage)
+            }
+            _ => Ok(ViewType::NearTx),
+        }
     }
 }
 
