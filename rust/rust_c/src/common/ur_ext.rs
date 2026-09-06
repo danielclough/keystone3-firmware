@@ -394,7 +394,9 @@ impl InferViewType for NearSignRequest {
         // An empty `sign_data` falls through as a transaction so the existing "no sign data" parse
         // error is what the holder sees, rather than a message screen with nothing on it.
         match self.get_sign_data().first() {
-            Some(data) if app_near::classify_payload(data) == app_near::NearPayloadType::Nep413Message => {
+            Some(data)
+                if app_near::classify_payload(data) == app_near::NearPayloadType::Nep413Message =>
+            {
                 Ok(ViewType::NearMessage)
             }
             _ => Ok(ViewType::NearTx),

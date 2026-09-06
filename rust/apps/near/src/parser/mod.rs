@@ -154,8 +154,11 @@ impl ParsedNearTx {
                 // forge extra "Method:"/"Args:" lines in this multi-line label) become spaces.
                 // args_display already sanitises, so only the method needs it here.
                 Action::FunctionCall(fc) => {
-                    let mut entry =
-                        format!("{}\nMethod: {}", fc.normalize(), sanitize_display(&fc.method_name));
+                    let mut entry = format!(
+                        "{}\nMethod: {}",
+                        fc.normalize(),
+                        sanitize_display(&fc.method_name)
+                    );
                     // A call with no args (deposit_and_stake, unstake_all, withdraw_all) gets no
                     // `Args:` line at all — matching the `skip_serializing_if` on the Details side —
                     // rather than a trailing `Args: ` that reads as an empty argument.
@@ -189,8 +192,11 @@ impl ParsedNearTx {
                                 // broadest function-call grant — so say so, not leave a blank line.
                                 entry.push_str("any");
                             } else {
-                                let methods: Vec<String> =
-                                    fc.method_names.iter().map(|m| sanitize_display(m)).collect();
+                                let methods: Vec<String> = fc
+                                    .method_names
+                                    .iter()
+                                    .map(|m| sanitize_display(m))
+                                    .collect();
                                 entry.push_str(&methods.join(", "));
                             }
                             entry.push_str("\nAllowance: ");
@@ -597,13 +603,18 @@ mod tests {
         let overview = |permission: AccessKeyPermission| {
             let tx = Transaction {
                 signer_id: "alice.near".parse().unwrap(),
-                public_key: "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV".parse().unwrap(),
+                public_key: "22skMptHjFWNyuEWY22ftn2AbLPSYpmYwGJRGwpNHbTV"
+                    .parse()
+                    .unwrap(),
                 nonce: 1,
                 receiver_id: "alice.near".parse().unwrap(),
                 block_hash: Default::default(),
                 actions: alloc::vec![Action::AddKey(AddKeyAction {
                     public_key: granted.clone(),
-                    access_key: AccessKey { nonce: 0, permission },
+                    access_key: AccessKey {
+                        nonce: 0,
+                        permission
+                    },
                 })],
             };
             let bytes = BorshSerialize::try_to_vec(&tx).unwrap();
@@ -679,8 +690,7 @@ mod tests {
         out
     }
 
-    const TEST_NONCE_HEX: &str =
-        "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b";
+    const TEST_NONCE_HEX: &str = "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b";
 
     #[test]
     fn a_nep413_message_is_shown_as_a_message_and_never_as_a_transaction() {

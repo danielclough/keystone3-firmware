@@ -1085,7 +1085,9 @@ pub unsafe extern "C" fn receive(ur: PtrString, decoder: PtrDecoder) -> *mut URP
             let decoder = extract_ptr_with_type!(decoder, KeystoneURDecoder);
             receive_ur(ur, decoder).c_ptr()
         }
-        Err(e) => URParseMultiResult::from(URError::UrDecodeError(format!("invalid utf-8 in ur: {e}")))
-            .c_ptr(),
+        Err(e) => {
+            URParseMultiResult::from(URError::UrDecodeError(format!("invalid utf-8 in ur: {e}")))
+                .c_ptr()
+        }
     }
 }

@@ -1,6 +1,8 @@
 use crate::account_id::AccountId;
 use crate::crypto::PublicKey;
-use crate::parser::utils::{format_call_args, format_gas_amount, format_method, format_u128_amount};
+use crate::parser::utils::{
+    format_call_args, format_gas_amount, format_method, format_u128_amount,
+};
 use crate::primitives_core::account::AccessKey;
 use crate::primitives_core::hash::{hash, CryptoHash};
 

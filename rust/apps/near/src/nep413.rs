@@ -68,9 +68,8 @@ impl Nep413Payload {
     /// exactly the mislead this device exists to prevent.
     pub fn parse(data: &[u8]) -> Result<Self> {
         let mut buf = data;
-        let tag = u32::deserialize(&mut buf).map_err(|err| {
-            NearError::ParseTxError(format!("NEP-413 tag unreadable: {}", err))
-        })?;
+        let tag = u32::deserialize(&mut buf)
+            .map_err(|err| NearError::ParseTxError(format!("NEP-413 tag unreadable: {}", err)))?;
         if tag != TAG {
             return Err(NearError::ParseTxError(format!(
                 "not a NEP-413 message: tag {} is not {}",
@@ -167,7 +166,10 @@ mod tests {
         assert_eq!("login to app.example", parsed.message);
         assert_eq!([0x11; 32], parsed.nonce);
         assert_eq!("app.example", parsed.recipient);
-        assert_eq!(Some("https://app.example/cb".to_string()), parsed.callback_url);
+        assert_eq!(
+            Some("https://app.example/cb".to_string()),
+            parsed.callback_url
+        );
     }
 
     /// The wire layout, pinned as a literal. A requester builds these bytes with its own borsh
@@ -185,9 +187,9 @@ mod tests {
                 "05000000",                                                         // len("hello")
                 "68656c6c6f",                                                       // "hello"
                 "1111111111111111111111111111111111111111111111111111111111111111", // nonce, raw
-                "08000000",                                 // len("app.near")
-                "6170702e6e656172",                         // "app.near"
-                "00",                                       // callback_url = None
+                "08000000",         // len("app.near")
+                "6170702e6e656172", // "app.near"
+                "00",               // callback_url = None
             ),
             hex::encode(&bytes)
         );
@@ -213,7 +215,10 @@ mod tests {
         assert!(!Nep413Payload::is_signing_payload(&tx));
         assert!(Nep413Payload::parse(&tx).is_err());
         // ...and still renders as the transaction it is, on the transaction screen.
-        assert_eq!("General", crate::parse(&tx).unwrap().display_type.to_string());
+        assert_eq!(
+            "General",
+            crate::parse(&tx).unwrap().display_type.to_string()
+        );
 
         let message = signing_bytes("hello", [0u8; 32], "app.example", None);
         assert!(Nep413Payload::is_signing_payload(&message));

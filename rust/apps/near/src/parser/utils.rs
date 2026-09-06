@@ -223,10 +223,7 @@ pub fn read_capped_string(
     if buf.len() < len {
         return Err(Error::new(
             ErrorKind::InvalidData,
-            format!(
-                "{what} claims {len} bytes but only {} remain",
-                buf.len()
-            ),
+            format!("{what} claims {len} bytes but only {} remain", buf.len()),
         ));
     }
     let (text, rest) = buf.split_at(len);
