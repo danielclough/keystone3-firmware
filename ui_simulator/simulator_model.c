@@ -445,7 +445,20 @@ int32_t AsyncExecuteWithPtr(void *func, const void *inData)
 {
 }
 
-static uint8_t buffer[100 * 1024];
+// The fake camera's scan buffer: the whole of qrcode_data.txt is read into this in one go.
+//
+// It was 100 KiB, which silently truncated anything larger. A NEAR `DeployGlobalContract` of a
+// ~160 KB contract reassembles into a single-part UR of ~322 KB of bytewords (and ~353 KB if the
+// animation is handed over frame-per-line instead), so two thirds of the request was dropped, the
+// bytewords CRC over the truncated text then failed, `parse_ur` errored, and `read_qrcode` gave up
+// leaving the device on its viewfinder with nothing on screen to say why. A real Keystone has no
+// such ceiling -- it accumulates the animation in its own decoder as the frames arrive -- so this
+// limit was the simulator inventing a failure the device it stands in for does not have.
+//
+// 1 MiB is BSS in a host process, not device RAM. `prepare_qrcode` refuses a file that fills it
+// rather than parsing a prefix, so the next payload to outgrow this says so.
+#define QRCODE_BUFFER_SIZE (1024 * 1024)
+static uint8_t buffer[QRCODE_BUFFER_SIZE];
 
 static char *qrcode[3000];
 static uint32_t qrcode_size;
@@ -527,7 +540,7 @@ int32_t prepare_qrcode()
 {
     printf("prepare_qrcode\r\n");
     char *path = "C:/assets/qrcode_data.txt";
-    memset(buffer, '\0', 100 * 1024);
+    memset(buffer, '\0', QRCODE_BUFFER_SIZE);
 
     lv_fs_file_t fd;
     lv_fs_res_t ret = LV_FS_RES_OK;
@@ -539,12 +552,23 @@ int32_t prepare_qrcode()
 
     int32_t readBytes = 0;
 
-    ret = lv_fs_read(&fd, buffer, 100 * 1024, &readBytes);
+    ret = lv_fs_read(&fd, buffer, QRCODE_BUFFER_SIZE, &readBytes);
     if (ret != LV_FS_RES_OK) {
         printf("lv_fs_read failed %s ret = %d line = %d\n", path, ret, __LINE__);
         return -1;
     }
     lv_fs_close(&fd);
+
+    // A read that filled the buffer exactly cannot be distinguished from one that stopped short of
+    // the end of the file, so it is refused rather than parsed. Feeding the decoder a prefix of a
+    // UR is the worst available outcome: the CRC failure it produces names nothing, and the device
+    // is left sitting on a viewfinder that looks identical to one waiting for a QR that never came.
+    if (readBytes >= QRCODE_BUFFER_SIZE) {
+        printf("qrcode_data.txt is at least %d bytes, which fills the scan buffer -- raise "
+               "QRCODE_BUFFER_SIZE rather than scanning a truncated payload\n",
+               QRCODE_BUFFER_SIZE);
+        return -1;
+    }
 
     int lastIndex = 0;
     int lastQRIndex = 0;
